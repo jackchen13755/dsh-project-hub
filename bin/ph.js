@@ -356,7 +356,57 @@ async function main() {
     return console.log(JSON.stringify(payload, null, 2))
   }
 
-  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | export）`)
+  // ── P1：需求 ↔ 代码 影响索引 ─────────────────────────────────────────
+  if (cmd === 'code') {
+    if (sub === 'scan') {
+      const result = await store.scanCode({
+        project: flags.project ?? null,
+        sinceDays: n(flags.since, 365),
+        force: flags.force === true,
+      })
+      return out(result, [
+        `扫描完成（回溯 ${result.sinceDays} 天）`,
+        ...result.results.map((r) =>
+          r.skipped
+            ? `  · ${r.project}：跳过（${r.skipped}）`
+            : r.error
+              ? `  · ${r.project}：失败（${r.error}）`
+              : `  · ${r.project}：提交 ${r.commits}（带号 ${r.numbered} / 覆盖率 ${(Number(r.coverage) * 100).toFixed(0)}%）· 特性合并 ${r.merges ?? 0}（带号 ${r.mergeNumbered ?? 0}${r.skippedHugeMerges ? `，跳过发布线同步 ${r.skippedHugeMerges}` : ''}）→ 需求 ${r.requirements} 个 / 文件 ${r.files} 个`,
+        ),
+      ].join('\n'))
+    }
+    if (sub === 'touches') {
+      const id = positional[2] ?? flags.id
+      if (!id) {
+        console.error('用法：dsh-ph code touches <需求号>')
+        return 2
+      }
+      const modules = store.listCodeTouches(id, { limit: n(flags.limit, 8) })
+      const files = store.listCodeFiles(id, { limit: n(flags.files, 40) })
+      if (modules.length === 0) return out({ modules: [], files: [] }, `需求 ${id} 没有代码落点（可能：还没开发 / 提交没带需求号 / 项目没本地目录）`)
+      return out({ modules, files }, [
+        `需求 ${id} 的代码落点：`,
+        ...modules.map((m) => `  · ${m.module}　${m.commits} 次提交 / ${m.files} 个文件　最近 ${m.lastSeen}`),
+        '',
+        '具体文件：',
+        ...files.slice(0, 20).map((f) => `  · ${f.path}（${f.commits} 次，最近 ${f.last_seen}）`),
+      ].join('\n'))
+    }
+    if (sub === 'coverage') {
+      const rows = store.codeCoverage()
+      return out({ projects: rows }, rows.length === 0
+        ? '还没有扫描过代码索引（先跑：dsh-ph code scan）'
+        : ['代码索引覆盖率（带号提交 / 全部提交）：', ...rows.map((r) => `  · ${r.project_name ?? r.project_id}：${(Number(r.coverage ?? 0) * 100).toFixed(0)}%（${r.numbered}/${r.commits} 次提交）→ 需求 ${r.requirements} 个 / 文件行 ${r.touch_rows}`)].join('\n'))
+    }
+    if (sub === 'recent') {
+      const rows = store.listRecentModuleActivity({ project: flags.project ?? null, module: flags.module ?? null, limit: n(flags.limit, 20) })
+      return out({ items: rows }, rows.map((r) => `  · ${r.last_seen}　${r.module}　${r.path}　（${r.commits} 次）${r.sample ? `　${String(r.sample).slice(0, 50)}` : ''}`).join('\n') || '（无）')
+    }
+    console.error('code 子命令：scan | touches <需求号> | coverage | recent --module <名字>')
+    return 2
+  }
+
+  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | code | export）`)
   process.exit(2)
 }
 
