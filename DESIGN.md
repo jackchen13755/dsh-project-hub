@@ -192,6 +192,10 @@
 可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
 数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
 
+**复制 vs 开会话**：卡片「复制」/ 详情里每个项目的「复制」走 `GET /brief`（**纯渲染**：不登记 workspace、
+不建会话），剪贴板不可用时把简报正文显示在提示条里；「开新会话」才走 `POST /open-session`（会 ensureWorkspace）。
+这条边界有测试钉住：复制路径下 `ensureWorkspace` 的调用次数必须是 0。
+
 **状态**：卡片上的状态下拉直接改（`POST /requirements/status`，只碰 `status` + `updated_at`，
 不重写标题/链接/项目）；`setRequirementStatus` **严格校验**（`normStatus` 对未知值原样透传，
 所以这里用 `REQ_STATUSES.includes()` 二次卡一道，避免下拉/接口写进拼错的状态）。

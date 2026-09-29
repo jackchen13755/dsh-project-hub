@@ -279,3 +279,24 @@ test('客户端：chooseProject —— 点过的优先，其次主项目，最�
   assert.equal(chooseProject([], 'x'), null)
   assert.deepEqual([...PLATFORM_CHOICES].slice(0, 2), ['PC', 'APP'])
 })
+
+test('复制按钮用 GET /brief：只渲染提示词，不登记 workspace、不开会话', async () => {
+  await seedMultiProject()
+  const calls = []
+  api = captureApi(store, {
+    version: 'x',
+    ensureWorkspace: async (path, title) => {
+      calls.push(path)
+      return { id: 'ws', path, title }
+    },
+  })
+  const res = await callApi(api.handler, { method: 'GET', url: `${BASE}/brief?id=SPMS-5922&project=spms-app` })
+  assert.equal(res.statusCode, 200)
+  assert.match(res.json.brief, /本次只做 \*\*APP 端\*\* 的开发/)
+  assert.equal(res.json.platform, 'APP')
+  assert.equal(calls.length, 0, '复制路径不得建 workspace / 开会话（与 /open-session 的区别就在这）')
+
+  // 对照：/open-session 会去登记 workspace（真开会的路径）
+  await callApi(api.handler, { method: 'POST', url: `${BASE}/open-session`, body: { id: 'SPMS-5922', project: 'spms-app' } })
+  assert.equal(calls.length, 1, '开会话才登记 workspace')
+})
