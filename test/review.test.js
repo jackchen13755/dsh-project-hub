@@ -117,11 +117,17 @@ test('reviewQuestions：每条问题都从证据出发；没有证据就明说',
   const target = store.attachLinksOne(store.requirementDetail('SPMS-5922'))
   const candidates = store.listRequirements({ archived: 'include', limit: 100 }).items.map((item) => ({ ...item, codeTouches: store.listCodeTouches(item.id) }))
   const related = findRelatedRequirements(target, candidates)
-  const questions = reviewQuestions({ target, related, drift: { verdict: 'doc-stale', evidence: '文档：2026-08-17|代码：2026-09-28' }, gaps: docGaps('只有一段背景'), coverage: 0.4 })
+  const questions = reviewQuestions({
+    target,
+    related,
+    drift: { verdict: 'doc-stale', reason: '文档停在 2026-08-17，但记录里出现了变更：2026-09-21「逻辑改成先扣库存」' },
+    gaps: docGaps('只有一段背景'),
+    coverage: 0.4,
+  })
   const text = questions.join('\n')
   assert.match(text, /同一份 Figma 稿/)
   assert.match(text, /isomorph\/views\/LostAndFound/)
-  assert.match(text, /文档可能没跟上/)
+  assert.match(text, /记录里出现了文档之外的变更/)
   assert.match(text, /回归范围/)
   assert.match(text, /没看到：/) // 文档缺口的提醒
 
@@ -129,6 +135,19 @@ test('reviewQuestions：每条问题都从证据出发；没有证据就明说',
   const empty = reviewQuestions({ target: { id: 'X', projects: [], codeTouches: [] }, related: [], drift: null, gaps: { checked: false, missing: [] }, coverage: 0 })
   assert.match(empty.join('\n'), /没有代码落点证据/)
   assert.match(empty.join('\n'), /带号覆盖率 0%/)
+})
+
+test('报告口径：文档在前、开发在后（work-since-doc）不许被写成"文档没跟上"', async () => {
+  const { renderReviewReport } = await import('../lib/review.js')
+  const markdown = renderReviewReport({
+    target: { id: 'X', title: 'T' },
+    related: [],
+    drift: { verdict: 'work-since-doc', reason: '文档 2026-08-17 之后一直在开发（最新 2026-09-29）—— 正常顺序' },
+    gaps: { checked: false, missing: [] },
+    coverage: 0.5,
+  })
+  assert.ok(!markdown.includes('文档之外的变更'), '正常推进不该出现在冲突点里')
+  assert.match(markdown, /漂移对账：\*\*work-since-doc\*\*/)
 })
 
 test('renderReviewReport：五节齐全 + 明写边界；无关联时也说清楚', async () => {

@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { dayOf, excerptOf, hashText, verdictOf } from '../lib/drift.js'
+import { changeSignalsIn, dayOf, excerptOf, hashText, verdictOf } from '../lib/drift.js'
 import { snapshotDoc } from '../lib/doc-snapshot.js'
 import { openStore, useTempHome } from './helpers.js'
 
@@ -38,26 +38,52 @@ test('dayOf：三种日期写法归一，认不出返回 null', () => {
   assert.equal(dayOf(null), null)
 })
 
-test('verdictOf：五种结论 + 证据行', () => {
-  // 代码比文档新 → 文档没跟上（核心场景）
-  const stale = verdictOf({ docChangedAt: '2026-08-17', codeLastAt: '2026-09-20', sessionLastAt: '2026-09-21', today: '2026-09-29' })
-  assert.equal(stale.verdict, 'doc-stale')
-  assert.match(stale.reason, /变更很可能没回写文档/)
-  assert.equal(stale.evidence.join('|'), '文档：2026-08-17|代码：2026-09-20|记录：2026-09-21')
+test('verdictOf：**文档在前、开发在后 = 正常推进**（不再当成漂移）', () => {
+  // 用户指出的关键：正常流程就是先文档后开发，"代码比文档新"是健康态
+  const normal = verdictOf({ docChangedAt: '2026-08-17', codeLastAt: '2026-09-20', sessionLastAt: '2026-09-21', today: '2026-09-29' })
+  assert.equal(normal.verdict, 'work-since-doc')
+  assert.match(normal.reason, /正常顺序/)
+  assert.equal(normal.evidence.join('|'), '文档：2026-08-17|代码：2026-09-20|记录：2026-09-21')
+  assert.equal(verdictOf({ docChangedAt: '2026-08-17', sessionLastAt: '2026-09-01', today: '2026-09-29' }).verdict, 'work-since-doc')
+})
 
-  // 会话记录比文档新也算（代码还没提交但已经聊了/记了）
-  assert.equal(verdictOf({ docChangedAt: '2026-08-17', sessionLastAt: '2026-09-01', today: '2026-09-29' }).verdict, 'doc-stale')
-  // 文档更新但没开发
-  assert.equal(verdictOf({ docChangedAt: '2026-09-20', today: '2026-09-29' }).verdict, 'code-pending')
-  // 文档不早于代码 → 跟上了
-  assert.equal(verdictOf({ docChangedAt: '2026-09-20', codeLastAt: '2026-09-18', today: '2026-09-29' }).verdict, 'aligned')
-  // 都停很久了 → silent 压过 doc-stale（都没人动了，别再催文档）
+test('verdictOf：**有「变更语义」记录才算 doc-stale**，并把原话写进理由', () => {
+  const signals = [{ date: '2026-09-21', text: '产品说这块逻辑改成先扣库存', word: '改成' }]
+  const stale = verdictOf({ docChangedAt: '2026-08-17', sessionLastAt: '2026-09-21', signals, today: '2026-09-29' })
+  assert.equal(stale.verdict, 'doc-stale')
+  assert.match(stale.reason, /文档停在 2026-08-17/)
+  assert.match(stale.reason, /改成/)
+  assert.match(stale.reason, /2026-09-21/)
+  assert.equal(stale.signals.length, 1)
+  assert.notEqual(verdictOf({ docChangedAt: '2026-08-17', sessionLastAt: '2026-09-21', signals: [], today: '2026-09-29' }).verdict, 'doc-stale')
+})
+
+test('verdictOf：doc-newer / silent / unknown 的边界', () => {
+  assert.equal(verdictOf({ docChangedAt: '2026-09-20', today: '2026-09-29' }).verdict, 'doc-newer')
+  assert.equal(verdictOf({ docChangedAt: '2026-09-20', codeLastAt: '2026-09-18', today: '2026-09-29' }).verdict, 'doc-newer')
   assert.equal(verdictOf({ docChangedAt: '2026-05-01', codeLastAt: '2026-05-02', today: '2026-09-29', silentDays: 30 }).verdict, 'silent')
-  // 但代码是最近动的 → 仍然是文档没跟上
-  assert.equal(verdictOf({ docChangedAt: '2026-05-01', codeLastAt: '2026-09-20', today: '2026-09-29', silentDays: 30 }).verdict, 'doc-stale')
-  // 数据不足
+  assert.equal(
+    verdictOf({ docChangedAt: '2026-05-01', codeLastAt: '2026-09-20', signals: [{ date: '2026-09-20', text: '改成 B', word: '改成' }], today: '2026-09-29', silentDays: 30 }).verdict,
+    'doc-stale',
+  )
   assert.equal(verdictOf({ today: '2026-09-29' }).verdict, 'unknown')
   assert.equal(verdictOf({ codeLastAt: '2026-09-20', today: '2026-09-29' }).verdict, 'unknown')
+})
+
+test('changeSignalsIn：只认文档更新之后、且带变更语义的记录', () => {
+  const records = [
+    { date: '2026-09-21', title: '产品说这块逻辑改成先扣库存', source: 'manual' },
+    { date: '2026-09-20', title: '正常开发，写了个列表页' },
+    { date: '2026-08-01', title: '改成旧方案（文档更新之前，不算）' },
+    { date: '2026-09-22', title: '去掉多余校验', detail: '评审结论' },
+  ]
+  const signals = changeSignalsIn(records, { afterDay: '2026-08-17' })
+  assert.equal(signals.length, 2)
+  assert.equal(signals[0].date, '2026-09-21')
+  assert.equal(signals[0].word, '改成')
+  assert.equal(signals[1].word, '去掉')
+  assert.ok(!signals.some((x) => x.date === '2026-08-01'), '文档更新之前的变更不算漂移')
+  assert.equal(changeSignalsIn(records, { afterDay: '2026-09-25' }).length, 0)
 })
 
 test('hashText / excerptOf：指纹稳定，摘要不留全文', () => {
@@ -118,20 +144,29 @@ test('store：抓快照 → 落库（版本/hash/摘要，无全文列）→ com
     .run('SPMS-5922', 'spms', 'src/queue/list.tsx', 'src/queue', 3, '2026-09-10', '2026-09-20', 'feat: 队列记录', Date.now())
   store.addLog({ date: '2026-09-21', project: 'spms', requirement: 'SPMS-5922', title: '改了队列逻辑' })
 
-  const computed = store.computeDrift({ today: '2026-09-29' })
-  const row = computed.rows.find((r) => r.requirementId === 'SPMS-5922')
-  assert.equal(row.verdict, 'doc-stale')
+  // 只有开发记录、没有变更语义 → 正常推进（不是漂移）
+  let computed = store.computeDrift({ today: '2026-09-29' })
+  let row = computed.rows.find((r) => r.requirementId === 'SPMS-5922')
+  assert.equal(row.verdict, 'work-since-doc', '文档在前、开发在后是健康态')
   assert.equal(row.docChangedAt, '2026-08-17')
   assert.equal(row.codeLastAt, '2026-09-20')
   assert.equal(row.sessionLastAt, '2026-09-21')
   assert.equal(row.docVersion, '3')
 
+  // 补一条"文档之后发生的变更语义" → 才判 doc-stale，并把原话存下来
+  store.addLog({ date: '2026-09-25', project: 'spms', requirement: 'SPMS-5922', title: '评审后把筛选逻辑改成按房号', detail: '产品确认' })
+  computed = store.computeDrift({ today: '2026-09-29' })
+  row = computed.rows.find((r) => r.requirementId === 'SPMS-5922')
+  assert.equal(row.verdict, 'doc-stale')
+  assert.equal(row.signals.length, 1)
+  assert.match(row.signals[0].text, /改成按房号/)
+
   const listed = store.listDrift()
   assert.equal(listed[0].requirement_id, 'SPMS-5922')
   assert.equal(listed[0].verdict, 'doc-stale')
   assert.match(listed[0].evidence, /文档版本 v3/)
-  // doc-stale 排在最前（面板/工具一眼看到要处理的）
-  assert.equal(listed[0].verdict, 'doc-stale')
+  assert.equal(Number(listed[0].signal_count), 1)
+  assert.match(listed[0].signals, /改成按房号/)
 })
 
 test('store：没有文档链接的需求如实标注，不瞎猜', async () => {
