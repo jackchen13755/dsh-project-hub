@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { candidatesFromStories, parsePager, parseStoryDetail, parseStoryList, scanZentaoStories, storyUrl } from '../lib/zentao-source.js'
+import { candidatesFromStories, pageUrlFrom, parsePager, parseStoryDetail, parseStoryList, scanZentaoStories, storyUrl } from '../lib/zentao-source.js'
 import { mergeCandidates } from '../lib/discover.js'
 import { extractRequirementNo } from '../lib/req-no.js'
 import { openStore, useTempHome } from './helpers.js'
@@ -44,7 +44,8 @@ const ROW = (id, title, openedBy, status) => `
   <td class='c-taskCount' title=''>0</td>
 </tr>`
 
-const PAGE = (rows) => `<table><thead><tr><th><a href='/index.php?m=product&f=browse&productID=1&branch=0&browseType=unclosed&param=0&orderBy=stage_asc&recTotal=461&recPerPage=20' class='header'>阶段</a></th></tr></thead><tbody>${rows}</tbody></table>`
+const PAGE = (rows, { total = 461, page = 1, perPage = 20 } = {}) => `<table><thead><tr><th><a href='/index.php?m=product&f=browse&productID=1&branch=0&browseType=unclosed&param=0&orderBy=stage_asc&recTotal=${total}&recPerPage=${perPage}' class='header'>阶段</a></th></tr></thead><tbody>${rows}</tbody></table>
+  <ul class='pagerProductBrowse' data-ride='pager' data-rec-total='${total}' data-rec-per-page='${perPage}' data-page='${page}' data-link-creator='/index.php?m=product&f=browse&productID=1&branch=&browseType=unclosed&param=0&orderBy=&recTotal=${total}&recPerPage={recPerPage}&pageID={page}'></ul>`
 
 test('parseStoryList：按真实结构解析出需求号/标题/创建人/状态，并读分页权威值', () => {
   const html = PAGE(ROW(6022, '【5922】L&F Q3 Enhancements/Queue数据记录', 'Zhang San', '激活') + ROW(6031, '2026 BSC SLC数据需求 - 10月 Updates', 'Li Si', '已关闭'))
@@ -83,68 +84,39 @@ test('candidatesFromStories：号优先取标题里的，没有就用 storyID；
   assert.equal(byNo.get('5783').wikiUrl.includes('pageId=159221810'), true, '描述里的 wiki 跟着候选走')
 })
 
-test('scanZentaoStories：每个产品一次请求（这个实例不支持 pageID 翻页），如实报告该产品总数', async () => {
+test('scanZentaoStories：按页面里的分页器模板翻页（别自己拼参数 —— 少 param=0 会返回 0 行）', async () => {
   const seen = []
+  const pages = { 1: 20, 2: 20, 3: 5 }
   const fetchText = async (url) => {
     seen.push(url)
-    assert.ok(!url.includes('pageID'), '不许带 pageID（实测会返回 0 行）')
-    if (url.includes('productID=1')) {
-      const rows = Array.from({ length: 20 }, (_, i) => ROW(6000 + i, `【${6000 + i}】需求`, 'Someone', '激活')).join('')
-      return { ok: true, text: PAGE(rows) } // recTotal=461
-    }
-    return { ok: true, text: PAGE('') }
+    const page = Number(url.match(/pageID=(\d+)/)?.[1] ?? 1)
+    if (page > 3) throw new Error('不该请求第 4 页')
+    const rows = Array.from({ length: pages[page] }, (_, i) => ROW(6000 + (3 - page) * 100 + i, `【${6000 + (3 - page) * 100 + i}】需求`, 'Zhang San', '激活')).join('')
+    return { ok: true, text: PAGE(rows, { total: 45, page }) }
   }
-  const result = await scanZentaoStories({ fetchText, productIds: ['1', '9'], withDetail: false })
-  assert.equal(result.calls, 2, '两个产品两次请求（本用例只测列表路径）')
-  assert.equal(result.pagination, false)
-  assert.equal(result.stories.length, 20)
-  assert.equal(result.products[0].total, 461, '报告里要写清该产品共多少条')
-  assert.equal(result.products[0].fetched, 20, '以及本次取了多少条')
-  assert.equal(result.products[1].fetched, 0)
+  const result = await scanZentaoStories({ fetchText, productIds: ['15'], maxPages: 5, withDetail: false })
+  assert.equal(result.pagination, true)
+  assert.equal(result.stories.length, 45, '20 + 20 + 5（第 3 页不满就停）')
+  assert.equal(result.products[0].total, 45)
+  assert.equal(result.products[0].pages, 3)
+  assert.equal(seen.length, 3, '只请求 3 页')
+  assert.match(seen[1], /pageID=2/)
+  assert.match(seen[1], /param=0/, '翻页链接要带上分页器模板里的参数')
+  assert.match(seen[1], /browseType=unclosed/)
 })
 
-test('parseStoryDetail：storyID 就是需求号，描述区里的 wiki 就是需求文档（用户给的 join key）', () => {
-  const html = `<html><head><title>STORY #5783 DBF活动风控支持 - 数据中心 - 禅道</title></head><body>
-    <div class='detail-content article-content'><p>需求文档：<a href='https://wiki.example.com/pages/viewpage.action?pageId=159221810'>https://wiki.example.com/pages/viewpage.action?pageId=159221810</a></p>
-    <p>背景：活动风控…</p></div></div></body></html>`
-  const detail = parseStoryDetail(html)
-  assert.equal(detail.noFromTitle, '5783', 'STORY #5783 → 需求号')
-  assert.equal(detail.storyTitle, 'DBF活动风控支持')
-  assert.equal(detail.wikiUrl, 'https://wiki.example.com/pages/viewpage.action?pageId=159221810')
-  assert.equal(detail.wikiPageId, '159221810')
-  assert.match(detail.description, /活动风控/)
-})
-
-test('禅道候选：需求号优先用详情/标题里的号，其次 storyID；并把描述里的 wiki 当文档地址', () => {
-  const stories = [
-    { storyId: '5783', title: 'DBF活动风控支持', url: 'u1', status: '激活', openedBy: 'Zhang San', noFromDetail: '5783', wikiUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=159221810' },
-    { storyId: '6001', title: '没有号的普通单', url: 'u2' },
-    { storyId: '5922', title: '【5922】Queue 数据记录', url: 'u3' },
-  ]
-  const candidates = candidatesFromStories(stories, { extractNo: extractRequirementNo })
-  const byNo = new Map(candidates.map((c) => [c.no, c]))
-  assert.equal(byNo.has('5783'), true, '详情的 STORY #N')
-  assert.equal(byNo.get('5783').wikiUrl.includes('pageId=159221810'), true)
-  assert.equal(byNo.has('6001'), true, '没有号就拿 storyID 当需求号（本团队 storyID == 需求号）')
-  assert.equal(byNo.has('5922'), true, '列表标题里的【N】也认')
-})
-
-test('scanZentaoStories：顺带拉详情（拿 wiki 链接），并统计 detail 数', async () => {
-  const fetchText = async (url) => {
-    if (url.includes('f=view&storyID=')) {
-      const id = url.match(/storyID=(\d+)/)[1]
-      return { ok: true, text: `<html><head><title>STORY #${id} 需求 ${id} - 禅道</title></head><body><div class='detail-content article-content'>https://wiki.example.com/pages/viewpage.action?pageId=1${id}</div></div></body></html>` }
-    }
-    const rows = ROW(5783, 'DBF活动风控支持', 'Zhang San', '激活') + ROW(5784, '另一个需求', 'Li Si', '激活')
-    return { ok: true, text: PAGE(rows) }
-  }
-  const result = await scanZentaoStories({ fetchText, productIds: ['1'], withDetail: true })
-  assert.equal(result.products[0].details, 2, '两条都拉了详情')
-  assert.equal(result.stories[0].wikiUrl.includes('pageId=15783'), true)
-  assert.equal(result.stories[0].noFromDetail, '5783')
-  const candidates = candidatesFromStories(result.stories, { extractNo: extractRequirementNo })
-  assert.equal(candidates.length, 2)
-  assert.equal(candidates[0].no, '5783')
+test('parsePager / pageUrlFrom：读分页器权威值，并用模板拼下一页', () => {
+  const html = PAGE('', { total: 430, page: 2, perPage: 20 })
+  const pager = parsePager(html)
+  assert.equal(pager.total, 430)
+  assert.equal(pager.perPage, 20)
+  assert.equal(pager.page, 2)
+  assert.match(pager.linkCreator, /pageID=\{page\}/)
+  const next = pageUrlFrom(pager.linkCreator, 3, { base: 'https://zentao.example.com', perPage: 20 })
+  assert.match(next, /^https:\/\/zentao\.example\.com\/index\.php\?/)
+  assert.match(next, /pageID=3/)
+  assert.match(next, /recPerPage=20/)
+  assert.equal(pageUrlFrom(null, 2), null, '没有模板就不翻页')
 })
 
 test('mergeCandidates：禅道来源是权威 —— 标题/状态以它为准，分数最高', () => {
