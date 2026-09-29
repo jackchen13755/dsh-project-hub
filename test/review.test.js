@@ -154,12 +154,14 @@ test('renderReviewReport：五节齐全 + 明写边界；无关联时也说清�
   await seed()
   const report = store.buildReviewReport('SPMS-5922', { now: '2026-09-29 20:00' })
   assert.equal(report.ok, true)
-  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 证据与边界']) {
+  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 复用检查（能不能不做）', '## 6. 前端交互检查', '## 7. 证据与边界']) {
     assert.ok(report.markdown.includes(section), `报告缺小节：${section}`)
   }
   assert.match(report.markdown, /SPMS-6001/)
   assert.match(report.markdown, /同一份 Figma 设计稿/)
   assert.match(report.markdown, /不是冲突概率/)
+  assert.match(report.markdown, /可能可复用/, '复用检查要有内容（SPMS-6001 同稿同模块）')
+  assert.ok(!report.markdown.includes('目前没有 UI 稿'), '这条需求有 Figma 链接 → 不该说没有稿')
   assert.match(report.markdown, /看不到的东西/)
   assert.ok(report.related.length >= 2)
 
@@ -168,6 +170,18 @@ test('renderReviewReport：五节齐全 + 明写边界；无关联时也说清�
   const lonely = store.buildReviewReport('ZZ-1')
   assert.match(lonely.markdown, /证据不足/)
   assert.equal(lonely.related.length, 0)
+})
+
+test('评审时还没有 UI 稿：如实说明，并给出"按代码 + 正文先审"的两条路', async () => {
+  await store.saveRequirement({ id: 'SPMS-7001', project: 'spms', title: '没有 UI 稿的需求', readTitle: false })
+  store.db
+    .prepare('INSERT OR REPLACE INTO code_touches (requirement_id, project_id, path, module, commits, first_seen, last_seen, sample, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run('SPMS-7001', 'spms', 'isomorph/views/LostAndFound/index.tsx', 'isomorph/views/LostAndFound', 3, '2026-09-01', '2026-09-20', 'feat: 改交互', Date.now())
+  const report = store.buildReviewReport('SPMS-7001')
+  assert.match(report.markdown, /目前没有 UI 稿/, '没有 Figma 链接就要明说')
+  assert.match(report.markdown, /从代码推/, '给出"按代码先审"的路径')
+  assert.match(report.markdown, /无稿情形/, '问题清单要区分无稿情形（谁出稿/何时出/先按哪套交互做）')
+  assert.match(report.markdown, /isomorph\/views\/LostAndFound/, '仍要列出改动落点')
 })
 
 test('renderReviewReport：无参数也能渲染（纯函数不吃 store）', () => {
@@ -209,9 +223,10 @@ test('API：POST /review-report 与 GET /review-report', async () => {
   const api = captureApi(store, { version: 't' })
   const post = await callApi(api.handler, { method: 'POST', url: '/project-hub/api/review-report', body: { id: 'SPMS-5922' } })
   assert.equal(post.statusCode, 200)
-  assert.match(post.json.markdown, /## 5. 证据与边界/)
+  assert.match(post.json.markdown, /## 7. 证据与边界/)
   const get = await callApi(api.handler, { method: 'GET', url: '/project-hub/api/review-report?id=SPMS-5922' })
   assert.equal(get.statusCode, 200)
+  assert.match(get.json.markdown, /## 7. 证据与边界/)
   assert.ok(get.json.related.length >= 2)
   const bad = await callApi(api.handler, { method: 'GET', url: '/project-hub/api/review-report' })
   assert.equal(bad.statusCode, 400)

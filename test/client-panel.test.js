@@ -193,7 +193,7 @@ test('侧边栏全链注册：页签类型 + 主体座位 + 标题座位 + 打�
   for (const expected of ['项目管理', '刷新', '需求台账', '开发日志', '会话扫描', '＋ 需求', '只看已归档']) {
     assert.ok(texts.includes(expected), `面板文案缺少「${expected}」（实际渲染到：${texts.slice(0, 300)}）`)
   }
-  assert.deepEqual([...mod.__test.TABS.map(([k]) => k)], ['req', 'logs', 'drift', 'scan'], '四个 tab：需求 / 日志 / 变更对账 / 扫描，分开不混')
+  assert.deepEqual([...mod.__test.TABS.map(([k]) => k)], ['req', 'history', 'logs', 'drift', 'scan'], '五个 tab：需求 / 历史需求 / 日志 / 变更对账 / 扫描，历史与在做的分开')
   assert.ok(!texts.includes('＋ 记录'), '默认在需求 tab，不该出现日志 tab 的「＋ 记录」按钮')
   assert.ok(!texts.includes('按天活动'), '需求 tab 不该出现会话扫描的按天活动')
   const titleEl = title.render()

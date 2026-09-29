@@ -687,3 +687,12 @@ test('store: quickCheck 与 backup（VACUUM INTO 到 backups/hub-YYYYMMDD.db）'
   reopened.store.close()
   writeFileSync(join(tmp.dir, 'touch'), '') // 保证 tmp.dir 还在（清理由 afterEach 负责）
 })
+
+test('历史需求与在做的需求分开：historical=exclude/only/include', async () => {
+  await store.saveRequirement({ id: 'SPMS-1', project: 'spms', title: '在做', readTitle: false })
+  await store.saveRequirement({ id: 'SPMS-5901', no: '5901', project: 'spms', title: '历史', readTitle: false, tags: ['历史导入'] })
+  const all = store.listRequirements({ limit: 20 }).items.map((r) => r.id)
+  assert.equal(all.includes('SPMS-1') && all.includes('SPMS-5901'), true, '默认 include（内部逻辑：查重/评审/发现都要看到全部）')
+  assert.deepEqual(store.listRequirements({ historical: 'exclude', limit: 20 }).items.map((r) => r.id), ['SPMS-1'])
+  assert.deepEqual(store.listRequirements({ historical: 'only', limit: 20 }).items.map((r) => r.id), ['SPMS-5901'])
+})
