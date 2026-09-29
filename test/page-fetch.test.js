@@ -230,3 +230,51 @@ test('bridgeUrlOf：环境变量优先，默认 127.0.0.1:9317', () => {
   assert.equal(bridgeUrlOf({ DAEMON_URL: 'http://127.0.0.1:9999' }), 'http://127.0.0.1:9999')
   assert.equal(bridgeUrlOf({ DSH_BRIDGE_URL: 'http://127.0.0.1:1234', DAEMON_URL: 'http://127.0.0.1:9999' }), 'http://127.0.0.1:1234')
 })
+
+test('中继：/status 报 running:false 也要实测转发（本机实测的坑）', async () => {
+  // 回归：早先代码信了 `running` 标志，把中继整跳跳过 → 掉到裸 fetch → 内部站点只剩登录页。
+  // 实测：running:false 时 POST /forward 依然 200 拿到页面。
+  const seen = []
+  const fetchImpl = async (url, init) => {
+    seen.push(String(url))
+    if (String(url).endsWith('/status')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, running: false, pid: null }), body: null }
+    }
+    if (String(url).endsWith('/forward')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 200, body: '<html><head><title>我的地盘</title></head></html>' }), body: null }
+    }
+    throw new Error('不该走到裸 fetch：中继已经拿到页面了')
+  }
+  const res = await fetchPage('https://zen.example.com/index.php', { fetchImpl, env: { DSH_COOKIE_JAR: join(tmp.dir, 'none.txt') } })
+  assert.equal(res.strategy, 'bridge', '必须走中继')
+  assert.equal(res.ok, true)
+  assert.equal(res.bridge.running, false, '标志仍是 false，但不影响转发')
+  assert.equal(res.attempts.join('|'), 'bridge:ok')
+  assert.ok(seen.some((u) => u.endsWith('/forward')), '要真的发一次 /forward')
+  assert.ok(!seen.some((u) => u.includes('zen.example.com/index.php?')), '不该再裸 fetch 同一个地址')
+})
+
+test('中继转发失败时才降级：错误原因进 attempts', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/status')) return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, running: true, pid: 1 }), body: null }
+    if (String(url).endsWith('/forward')) return { ok: true, status: 200, text: async () => JSON.stringify({ error: '没有扩展在轮询' }), body: null }
+    return { ok: true, status: 200, text: async () => '<html><head><title>公开页</title></head></html>', body: null }
+  }
+  const res = await fetchPage('https://public.example.com/a', { fetchImpl, env: { DSH_COOKIE_JAR: join(tmp.dir, 'none.txt') } })
+  assert.equal(res.strategy, 'plain')
+  assert.equal(res.ok, true)
+  assert.match(res.attempts.join('|'), /bridge:没有扩展在轮询/)
+})
+
+test('cookie jar 没命中时，原因里要带出 jar 里现有哪些 host', async () => {
+  const jar = writeJar(tmp.dir, 'zen.example.com', [['zentaosid', 'abc']])
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/status')) throw new Error('down')
+    return { ok: false, status: 502, text: async () => '', body: null }
+  }
+  const res = await fetchPage('https://other.example.com/doc', { fetchImpl, env: { DSH_COOKIE_JAR: jar } })
+  assert.equal(res.ok, false)
+  const attempt = res.attempts.find((a) => a.startsWith('cookie-jar:'))
+  assert.match(attempt, /没有 other\.example\.com 的 Cookie/)
+  assert.match(attempt, /zen\.example\.com/, '要说清 jar 里到底有什么')
+})

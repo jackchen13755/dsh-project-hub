@@ -74,6 +74,9 @@
 
 **取页带登录态（`lib/page-fetch.js`，与 dsh-zentao-workbench 同款策略链）**：
 ① 浏览器中继（`dsh-fetch-page` 守护进程 `127.0.0.1:9317` 的 `POST /forward`，扩展自动附带登录 Cookie）
+> ⚠️ **只要守护进程可达就实测转发，不看 `/status` 的 `running` 标志**：本机实测 `running:false` 时
+> `POST /forward` 依然 200 拿到页面（禅道插件注释里也记了「该标志不可靠，以实测为准」）。
+> 本项目曾信了这个标志 → 中继整跳被跳过 → 掉到裸 fetch → 内部站点只剩登录页（用户实测报障）。
 → ② cookie jar（Netscape 格式：`$DSH_COOKIE_JAR` / `~/.config/zentao/cookies.txt` /
 `~/.dsh/storages/dsh-zentao-workbench/cookies.txt`，按 host 匹配、剔除过期）
 → ③ 裸 fetch。**会话失效时服务端给的往往不是登录表单，而是一个跳转壳**
@@ -84,6 +87,9 @@
 避免把「登录」两个字当需求标题存进台账。
 > 实测：本机 `~/.config/zentao/cookies.txt`（2026-09-23 导出）里的会话已过期 → 服务端把请求跳到登录页，
 > 链路如实报 `staleJar:true` 并提示「重新导出 jar 或连上浏览器扩展」；`~/.local/bin/zentao-export-cookies` 重导后即可自动读回真实标题。
+> jar 没命中时 `jarLookup()` 会带回「扫过的 jar 里都有哪些 host」，错误里直接说
+> 「jar 里没有 X 的 Cookie（现存的 jar 只有：zen.example.com）」，比「没有可用的 jar」有用得多。
+>
 > 坑：判定正则不能写 `(登录)\b` —— `\b` 只在「词字符/非词字符」交界成立，中文不是 `\w`，
 > `登录 - 禅道` 永远匹配不上（本项目实测踩过）。
 
