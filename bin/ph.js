@@ -356,6 +356,23 @@ async function main() {
     return console.log(JSON.stringify(payload, null, 2))
   }
 
+  // ── P3：一键评审影响报告 ────────────────────────────────────────────
+  if (cmd === 'review') {
+    const id = positional[1] ?? flags.id
+    if (!id) {
+      console.error('用法：dsh-ph review <需求ID> [--project X] [--platform PC]')
+      return 2
+    }
+    const report = store.buildReviewReport(id, { project: flags.project ?? null, platform: flags.platform ?? null })
+    if (!report.ok) {
+      console.error(report.error)
+      return 1
+    }
+    if (flags.json) console.log(JSON.stringify(report, null, 2))
+    else console.log(report.markdown)
+    return 0
+  }
+
   // ── P2：文档漂移对账 ────────────────────────────────────────────────
   if (cmd === 'drift') {
     if (sub === 'refresh') {
@@ -428,7 +445,7 @@ async function main() {
     return 2
   }
 
-  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | code | drift | export）`)
+  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | code | drift | review | export）`)
   process.exit(2)
 }
 

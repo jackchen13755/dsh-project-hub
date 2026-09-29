@@ -30,6 +30,7 @@ const EXPECTED_NAMES = [
   'ph_link',
   'ph_brief',
   'ph_drift',
+  'ph_review',
   'ph_search',
   'ph_scan_sessions',
   'ph_report',
@@ -64,8 +65,8 @@ afterEach(() => {
 
 const run = (name, args, exec) => byName.get(name).execute(args, exec)
 
-test('tools: buildTools 返回 13 个工具，结构契约齐全', () => {
-  assert.equal(tools.length, 13)
+test('tools: buildTools 返回 14 个工具，结构契约齐全', () => {
+  assert.equal(tools.length, 14)
   assert.deepEqual(tools.map((t) => t.name), EXPECTED_NAMES)
   for (const tool of tools) {
     assert.equal(typeof tool.name, 'string')

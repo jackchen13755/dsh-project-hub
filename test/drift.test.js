@@ -111,6 +111,7 @@ test('store：抓快照 → 落库（版本/hash/摘要，无全文列）→ com
   assert.ok(snap.excerpt)
   const columns = store.db.prepare('PRAGMA table_info(doc_snapshots)').all().map((r) => r.name)
   assert.equal(columns.includes('text'), false, 'doc_snapshots 里不能有正文字段')
+  assert.ok(columns.includes('checks'), '要有全文关键词命中标记（避免摘要截断造成文档缺口假警报）')
 
   // 造出「代码比文档新」：一条 9 月的代码落点 + 一条 9 月的记录
   store.db.prepare('INSERT OR REPLACE INTO code_touches (requirement_id, project_id, path, module, commits, first_seen, last_seen, sample, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
