@@ -28,6 +28,10 @@
   `project_id`，报表照样能区分是哪个仓库。
 - 扫描生成的工作记录幂等：唯一索引 `(date, project_id, requirement_id, session_id) WHERE source='session-scan'`。
 - 搜索用 `LIKE` 子串匹配（数据量百级，实测毫秒级），中文不需要分词器。
+- `search().days` 与 `report().days` **同一口径**（扫描活动 + 手工记录都出现），避免面板两个视图对不上；
+  只有手工记录的那天会回查 `projects` 表补 `projectName`。
+- 项目 id 用 Unicode slug（`\p{L}\p{N}`）：中文目录保留，不与同名 ASCII 目录撞 id，也不塌成 `unknown`。
+- 扫描 `dryRun` 报的是「**将会写入**多少」（回查部分唯一索引），不是恒为 0。
 
 ## 3. 会话扫描（「哪天开发了哪些项目的哪些需求」）
 
@@ -72,7 +76,7 @@
 | POST | `/logs/add` | `{ date?,project,requirement?,kind?,title,detail?,minutes? }` | `{ ok, log }` |
 | POST | `/logs/delete` | `{ id }` | `{ ok }` |
 | GET | `/search` | `q?,project?,requirement?,from?,to?,kind?,limit?` | `{ ok, requirements:[...], logs:[...], days:[{date,projects:[{projectId,projectName,requirements:[{id,title,msgs,lastTime}]}]}] }` |
-| POST | `/scan` | `{ since?,dryRun?,limit? }` | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails }` |
+| POST | `/scan` | `{ since?,dryRun?,limit? }`（只做增量；传 `full`/`rebuild` 会在响应里回 `ignored` + `note`） | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails, ignored? }` |
 | GET | `/report` | `from?,to?,project?` | `{ ok, days:[{date,projects:[{projectId,projectName,logCount,requirements:[{id,title,msgs,toolCalls,lastTime}]}]}], totals }` |
 | POST | `/doc-title` | `{ url?,path? }` | `{ ok, title, source }` |
 
