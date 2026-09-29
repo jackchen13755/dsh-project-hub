@@ -315,7 +315,7 @@ test('项目配色：同一项目恒定同色，不同项目基本不同色（�
   assert.ok(colors.size >= 4, `8 个项目至少 4 种颜色，实际 ${colors.size}`)
 })
 
-test('面板底色：四处内联不透明底色（样式表被 CSP 拦掉也照样不透明）', () => {
+test('面板底色：四处内联不透明底色，其余样式（按钮圆角 / 字号 / 页签）一律不动', () => {
   const { def, appended } = loadClient()
   const mod = def.factory(() => fakeReact())
 
@@ -345,43 +345,41 @@ test('面板底色：四处内联不透明底色（样式表被 CSP 拦掉也照
   }
   mod.apply(ctx)
 
-  // ① 底色必须内联：桌面外壳可能拦掉注入的 <style>（CSP 只放行 style-src-attr），
-  //    写在表里的底色会静默失效 —— 那正是「面板还是透明」的成因。
-  const css = appended.map((el) => el.textContent).join('\n')
-  assert.ok(!/dsh-ph-surface/.test(css), '底色不该再放样式表')
-  assert.ok(!/bg-layer-1/.test(css), '样式表里不该出现面板底色令牌（表不生效时会丢）')
-  assert.ok(/dsh-ph-tab:hover/.test(css), '页签 hover 这类点缀留在表里')
+  const tree = slotRegistrations.find((r) => r.payload.name === 'sidebar.right.pane.tab').render({ sessionId: 'session-preview' })
+  const all = collectElements(tree)
 
-  // ② 面板本体 + 头部 + 页签条 + 吸顶工具栏四处：同一份内联底色，且**不透明**
-  const body = slotRegistrations.find((r) => r.payload.name === 'sidebar.right.pane.tab')
-  const tree = body.render({ sessionId: 'session-preview' })
-  const surfaces = collectElements(tree).filter((el) => el.props && el.props.style && 'backgroundColor' in el.props.style)
+  // ① 底色：面板本体 / 头部 / 页签条 / 吸顶工具栏四处，同一份、**不透明**、内联
+  //    （内联是刻意的：注入的 <style> 在桌面外壳里可能被 CSP 拦掉，底色不能只写在表里）
+  const surfaces = all.filter((el) => el.props && el.props.style && 'backgroundColor' in el.props.style)
   assert.equal(surfaces.length, 4, `面板本体 + 头部 + 页签条 + 工具栏都该有底色，实际 ${surfaces.length} 处`)
   for (const el of surfaces) {
     const { backgroundColor, backgroundImage } = el.props.style
     assert.match(backgroundColor, /^var\(--dsw-alias-bg-layer-1/, '底色要用宿主的 bg-layer-1（不透明面板色）')
     assert.ok(!/transparent|rgba\(/.test(backgroundColor), `面板底色不许带透明度：${backgroundColor}`)
     assert.match(backgroundImage, /^linear-gradient\(color-mix\(in srgb, var\(--dsw-alias-brand-primary/, '淡染层 = 主题色纯色渐变')
-    assert.ok(!/transparent\)/.test(backgroundImage.replace(/, transparent\)/g, '')), '淡染层只能是同一个颜色叠两次')
   }
-  const same = new Set(surfaces.map((el) => JSON.stringify([el.props.style.backgroundColor, el.props.style.backgroundImage])))
-  assert.equal(same.size, 1, '四处必须是同一份底色（否则吸顶工具栏会和内容区对不上）')
-  assert.ok(
-    surfaces.some((el) => el.props.style.flexDirection === 'column' && el.props.style.height === '100%'),
-    '撑满座位的面板根节点也要有底色',
-  )
+  const distinct = new Set(surfaces.map((el) => JSON.stringify([el.props.style.backgroundColor, el.props.style.backgroundImage])))
+  assert.equal(distinct.size, 1, '四处必须是同一份底色（否则吸顶工具栏会和内容区对不上）')
 
-  // ③ 页签形状/颜色也内联（不在表里）：5 个页签、当前页签高亮走 accent
-  const tabs = collectElements(tree).filter((el) => el.props && el.props.className === 'dsh-ph-tab')
-  assert.equal(tabs.length, 5, `五个页签都要有内联样式，实际 ${tabs.length}`)
-  for (const tab of tabs) {
-    assert.ok(tab.props.style && tab.props.style.borderBottom, '页签下边框（选中态那条 accent 线）必须内联')
-    assert.ok(!('opacity' in tab.props.style), '页签不许用 opacity 调淡（半透明文字 = 看不清）')
+  // ② 其余样式一律不动：按钮圆角仍是 6、面板基准字号仍是 12
+  for (const el of all.filter((x) => x.type === 'button' && x.props.style && x.props.style.borderRadius !== undefined)) {
+    assert.equal(el.props.style.borderRadius, 6, '按钮圆角保持原样（本轮只加背景，不改圆角）')
   }
-  assert.ok(
-    tabs.some((el) => String(el.props.style.borderBottom).includes('state-business-primary')),
-    '选中的页签要用 accent 下划线',
-  )
+  const root = surfaces.find((el) => el.props.style.flexDirection === 'column' && el.props.style.height === '100%')
+  assert.equal(root.props.style.fontSize, 12, '面板字号保持原样')
+  assert.ok(!('borderRadius' in root.props.style), '面板本体不加圆角')
+
+  // ③ 页签仍走样式表类（形状不内联）—— 上一版把页签内联成圆角标签，用户明确不要
+  const tabs = all.filter((el) => typeof el.props.className === 'string' && el.props.className.startsWith('dsh-ph-tab'))
+  assert.equal(tabs.length, 5, '五个页签仍在')
+  for (const tab of tabs) {
+    assert.ok(!('borderRadius' in (tab.props.style ?? {})), '页签圆角不许内联（保持原样）')
+    assert.ok(!('padding' in (tab.props.style ?? {})), '页签内边距不许内联（保持原样）')
+  }
+
+  // ④ 样式表里不许出现底色令牌：底色只在内联 style 里
+  const css = appended.map((el) => el.textContent).join('\n')
+  assert.ok(!/bg-layer-1/.test(css), '样式表里不该有面板底色')
 })
 
 test('删除按钮：两段确认的文案状态机（只在归档视图出现）', () => {

@@ -178,21 +178,12 @@
 `sidebarRight.openTab(KIND)` 打开；**入口按钮**走 `sidebar.footer.action`（侧边栏底部「📋 项目管理」）。
 内联渲染约束：根节点 `flex:1 1 auto` 撑满座位、滚动区 `min-height:0`，不渲染悬浮层/固定抽屉。
 
-**样式契约（两条，踩过坑才写下来）**：
-1. **令牌只用宿主真实存在的名字** —— `label-primary/secondary/tertiary`、`border-l1/l2`、
-   `bg-base` / `bg-layer-1..3`、`interactive-bg-hover`、`state-business-primary` /
-   `state-success-primary` / `state-warn-primary` / `state-error-primary`。
-   早期版本写过 `--dsw-alias-text-1` / `-bg-1` / `-bg-2` / `-brand-1` 这类**不存在**的名字，
-   于是每个颜色都静默退回硬编码兜底值（`dsh-zentao-workbench` 踩过同一个坑）。
-2. **撑门面的颜色一律内联 style**（面板底色 / 卡片 / 页签 / 胶囊）——桌面外壳可能拦掉注入的
-   `<style>` 元素（CSP 只放行 `style-src-attr` 时），表里的规则会静默失效；注入的样式表只留
-   hover / focus / 过渡 / 滚动条这类点缀。同理，**次要文字用 `label-secondary/tertiary` 令牌而不是
-   `opacity`**：半透明文字叠在半透明底上就是「看不清」。
-3. 面板底色 = 宿主 **不透明** 令牌 `--dsw-alias-bg-layer-1` 打底 + 一层主题色淡染
-   （`backgroundColor` + `backgroundImage: linear-gradient(<color-mix 10% 主题色>, 同色)`）。
-   拆两个属性是为了优雅降级：老浏览器不认识 `color-mix` 时只丢淡染层，不透明底色仍在。
-   四处（面板本体 / 头部 / 页签条 / 吸顶工具栏）共用同一份 `SURFACE`，浓淡只调 `ACCENT_MIX`
-   （`0%` = 纯宿主面板色）。
+**底色（本轮唯一新增的样式，按钮/页签/胶囊的形状与圆角一律不动）**：面板本体 / 头部 / 页签条 /
+**吸顶工具栏** 四处共用同一份 `SURFACE` —— `backgroundColor: var(--dsw-alias-bg-layer-1)`（宿主
+**不透明** 面板色，各套 dream-skin 皮肤给的都是纯色）+ `backgroundImage: linear-gradient(<主题色 10%>, 同色)`
+淡染。写成内联而不是注入的 `<style>`：桌面外壳可能拦掉 style 元素（CSP 只放行 `style-src-attr` 时），
+写表里会静默失效（「面板还是透明的」就是这么来的）。拆成两个属性是刻意降级：老浏览器不认 `color-mix`
+时只丢淡染层，不透明底色仍在。浓淡只改 `ACCENT_MIX`（`0%` = 纯宿主面板色）。
 
 **内容（三个 tab 严格分开，不混在一起）**：
 - **需求台账**：筛选（搜索 / 项目 / **标签** / 只看已归档；标签选项来自 `/requirements/tags`，带条数，
