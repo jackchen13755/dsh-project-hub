@@ -192,6 +192,12 @@
 可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
 数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
 
+**两个「开新会话」**：`POST /open-session {branch:true}` 会在提示词里插入「## 开工前：从 master 拉新分支并切过去」
+（分支名 + 命名格式 + `git fetch origin && git checkout -b <branch> origin/master` + 「已存在就直接切」+「基线是 master」）。
+分支名由 `lib/branch.js` 生成：`feature/YYYYMMDD-<英文slug>-<需求号>`，日期按 `Asia/Shanghai`，
+英文 slug 只保留标题里的拉丁字母/数字段（纯中文标题退化成 `req`），**同一天同一需求稳定复现**。
+不带 `branch` 的路径**一个字节都没变** —— 测试会把分支段整块抠掉后断言两份提示词完全一致。
+
 **复制 vs 开会话**：卡片「复制」/ 详情里每个项目的「复制」走 `GET /brief`（**纯渲染**：不登记 workspace、
 不建会话），剪贴板不可用时把简报正文显示在提示条里；「开新会话」才走 `POST /open-session`（会 ensureWorkspace）。
 这条边界有测试钉住：复制路径下 `ensureWorkspace` 的调用次数必须是 0。
