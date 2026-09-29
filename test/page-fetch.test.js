@@ -279,3 +279,14 @@ test('cookie jar 没命中时，原因里要带出 jar 里现有哪些 host', as
   assert.match(attempt, /没有 other\.example\.com 的 Cookie/)
   assert.match(attempt, /zen\.example\.com/, '要说清 jar 里到底有什么')
 })
+
+test('JSON 响应不许被判成登录页（CQL 摘要里出现"登录"两字就会误判 —— 实测把整棵文档树扫描卡住）', () => {
+  const json = JSON.stringify({ results: [{ title: '【5922】需求', excerpt: '用户登录后可见；登录态校验在网关' }], totalSize: 1239 })
+  assert.equal(looksLikeLoginPage(json), false)
+  assert.equal(looksLikeLoginPage(`[{"excerpt":"登录"}]`), false)
+  // 但真正的登录页仍要认出来
+  assert.equal(looksLikeLoginPage('<html><head><title>登录 - Confluence</title></head><body></body></html>'), true)
+  assert.equal(looksLikeLoginPage('<html><body><form><input name="os_username"><input name="os_password"></form><p>请先登录</p></body></html>'), true)
+  // 没有 HTML 语境的散文中「请先登录」不算
+  assert.equal(looksLikeLoginPage('说明：未登录时请先登录，然后重试'), false)
+})
