@@ -1,0 +1,192 @@
+/**
+ * 客户端面板契约测试（**不装浏览器**也要能验，技法同 dsh-zentao-workbench / dsh-memory-core）。
+ *
+ * 验三件事，任何一件退化都会让面板「静默不出现」：
+ *   ① 交付信封：`window.__ModuleLoader__.load({ id, factory })`，id 与包名一致；
+ *   ② 侧边栏注册全链：`sidebarRightTabs.register({id,kind,title,guide})` +
+ *      `slots.register('sidebar.right.pane.tab', key=TYPE_ID)` + 标题座位；
+ *   ③ 渲染路径可跑：用假 React 调一次 seat 的 render(props)，不能抛。
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import vm from 'node:vm'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const CLIENT = join(here, '..', 'lib', 'client.js')
+
+/** 假 React：只要够跑通面板的结构（createElement + 四个 hook）。 */
+function fakeReact() {
+  const calls = []
+  return {
+    calls,
+    createElement: (type, props, ...children) => {
+      calls.push({ type, props, children })
+      return { type, props: props ?? {}, children }
+    },
+    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useEffect: () => {},
+    useCallback: (fn) => fn,
+    useRef: (value) => ({ current: value }),
+  }
+}
+
+/** 递归收集渲染树里的所有字符串；函数组件要真的调用一次才会展开（假 React 不做这件事）。 */
+function collectStrings(node, out = [], depth = 0) {
+  if (node === null || node === undefined || depth > 20) return out
+  if (typeof node === 'string' || typeof node === 'number') {
+    out.push(String(node))
+    return out
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectStrings(item, out, depth + 1)
+    return out
+  }
+  if (typeof node === 'object') {
+    if (typeof node.type === 'function') {
+      collectStrings(node.type(node.props ?? {}), out, depth + 1)
+      return out
+    }
+    if (node.children) collectStrings(node.children, out, depth + 1)
+    if (node.props && node.props.children) collectStrings(node.props.children, out, depth + 1)
+  }
+  return out
+}
+
+function loadClient() {  const code = readFileSync(CLIENT, 'utf8')
+  let captured = null
+  const appended = []
+  const windowStub = {
+    __ModuleLoader__: { load: (def) => { captured = def } },
+    setInterval: () => 0,
+    clearInterval: () => {},
+  }
+  const documentStub = {
+    getElementById: () => null,
+    createElement: () => ({ id: '', textContent: '' }),
+    head: { appendChild: (el) => appended.push(el) },
+  }
+  const sandbox = { window: windowStub, document: documentStub, console, URLSearchParams, Date, JSON, Math, Number, String, Object, Array, Error, Boolean }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(code, sandbox, { filename: 'lib/client.js' })
+  return { def: captured, appended }
+}
+
+test('客户端信封：id 与 factory 形态符合宿主约定', () => {
+  const { def } = loadClient()
+  assert.ok(def, 'window.__ModuleLoader__.load 没有被调用')
+  assert.equal(def.id, 'dsh-project-hub')
+  assert.equal(typeof def.factory, 'function')
+  const React = fakeReact()
+  const mod = def.factory(() => React)
+  // 跨 vm realm 的数组不能直接 deepEqual（原型不同），按值比
+  assert.equal(mod.inject.length, 1)
+  assert.equal(mod.inject[0], 'slots')
+  assert.equal(typeof mod.apply, 'function')
+  assert.ok(mod.__test, '应导出 __test 便于契约测试')
+  assert.equal(mod.__test.TYPE_ID, 'dsh-project-hub:panel')
+})
+
+test('侧边栏全链注册：页签类型 + 主体座位 + 标题座位 + 打开入口', () => {
+  const { def } = loadClient()
+  const React = fakeReact()
+  const mod = def.factory(() => React)
+
+  const tabRegistrations = []
+  const slotRegistrations = []
+  const openCalls = []
+  const effects = []
+
+  const ctx = {
+    inject: (deps, cb) => {
+      if (deps.includes('sidebarRightTabs')) {
+        cb({ sidebarRightTabs: { register: (payload) => { tabRegistrations.push(payload); return () => {} } } })
+      }
+      if (deps.includes('sidebarRight')) {
+        cb({ sidebarRight: { openTab: (kind, opts) => openCalls.push({ kind, opts }) } })
+      }
+      return () => {}
+    },
+    slots: {
+      inject: (name, cb) => {
+        cb()
+        return () => {}
+      },
+      register: (payload, render) => {
+        slotRegistrations.push({ payload, render })
+        return () => {}
+      },
+    },
+    effect: (fn, label) => {
+      effects.push(label ?? '(unlabeled)')
+      const dispose = fn()
+      return () => {
+        if (typeof dispose === 'function') dispose()
+      }
+    },
+  }
+
+  const handle = mod.apply(ctx)
+
+  // ① 页签类型
+  assert.equal(tabRegistrations.length, 1, '必须注册且只注册一次侧边栏页签类型')
+  const tab = tabRegistrations[0]
+  assert.equal(tab.id, mod.__test.TYPE_ID)
+  assert.equal(tab.kind, mod.__test.KIND)
+  assert.equal(typeof tab.title, 'function')
+  assert.equal(tab.title(), '项目管理')
+  assert.ok(Array.isArray(tab.guide) && tab.guide.length === 1, '要有 guide 入口项')
+  assert.equal(typeof tab.guide[0].title, 'function')
+
+  // ② 主体 + 标题座位
+  const body = slotRegistrations.find((r) => r.payload.name === 'sidebar.right.pane.tab')
+  const title = slotRegistrations.find((r) => r.payload.name === 'sidebar.right.pane.tab.title')
+  assert.ok(body, '缺少 sidebar.right.pane.tab 主体座位')
+  assert.ok(title, '缺少 sidebar.right.pane.tab.title 标题座位')
+  assert.equal(body.payload.key, mod.__test.TYPE_ID)
+  assert.equal(title.payload.key, mod.__test.TYPE_ID)
+  assert.equal(typeof body.render, 'function')
+  assert.equal(typeof title.render, 'function')
+
+  // ③ 渲染路径（假 React 下不能抛）：页面头、状态行、两个页签按钮都要出现
+  const tree = body.render({ sessionId: 'session-test' })
+  assert.ok(tree, 'render 必须返回元素')
+  const texts = collectStrings(tree).join('|')
+  for (const expected of ['项目管理', '刷新', '扫描会话', '需求台账', '开发日志', '＋ 需求', '＋ 记录']) {
+    assert.ok(texts.includes(expected), `面板文案缺少「${expected}」（实际渲染到：${texts.slice(0, 300)}）`)
+  }
+  const titleEl = title.render()
+  assert.ok(titleEl)
+
+  // ④ 打开入口：没有它页签注册了也没人看得见
+  assert.equal(typeof handle.openPanel, 'function')
+  assert.equal(handle.openPanel(), true)
+  assert.equal(openCalls.length, 1)
+  assert.equal(openCalls[0].kind, mod.__test.KIND)
+
+  // ⑤ 侧边栏入口按钮（用户明确要求「入口加在侧边栏里」）
+  const footer = slotRegistrations.find((r) => r.payload.name === 'sidebar.footer.action')
+  assert.ok(footer, '缺少 sidebar.footer.action 侧边栏入口座位')
+  assert.equal(footer.payload.id, 'project-hub')
+  assert.equal(footer.payload.order, 36)
+  const entryTree = footer.render({})
+  assert.ok(entryTree, '入口按钮必须渲染出元素')
+  assert.ok(collectStrings(entryTree).join('|').includes('项目管理'), '入口按钮文案应为「项目管理」')
+  // 点入口 → 打开右侧边栏页签（__test 走的是同一个 openPanelRef）
+  assert.equal(mod.__test.openSidebar(), true)
+  assert.equal(openCalls.length, 2)
+})
+
+test('纯函数：查询串拼装 / 日期 / 字典', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { scopeQuery, today, fmtTime, KIND_LABEL } = mod.__test
+  assert.equal(scopeQuery({ q: '看板', project: '', limit: null }, null), '?q=%E7%9C%8B%E6%9D%BF')
+  assert.equal(scopeQuery({ q: 'x' }, 'session-1'), '?q=x&sessionId=session-1')
+  assert.match(today(), /^\d{4}-\d{2}-\d{2}$/)
+  assert.equal(fmtTime(null), '-')
+  assert.equal(KIND_LABEL.bug, '缺陷')
+})

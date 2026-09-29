@@ -1,0 +1,63 @@
+{
+  "name": "dsh-project-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness 项目管理插件：需求 ID 台账（需求文档 / WBS / 后端设计文档 / 所属项目）+ 会话扫描开发记录 + 按项目 / 需求 / 日期检索（SQLite 单一事实源）",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-ph": "bin/ph.js"
+  },
+  "files": [
+    "lib",
+    "bin",
+    "cordis.patch.yml",
+    "README.md",
+    "DESIGN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "supported": {
+      "dsh": ">=0.1.5-rc.1",
+      "note": "只走官方扩展点：tools.register / webServer.register / slots 客户端槽位；可选服务一律 ctx.get 探测，不写进硬 inject。不声明 peerDependencies 以避免安装期拉依赖。"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "project-management",
+    "requirement",
+    "wbs",
+    "sqlite"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackchen13755/dsh-project-hub.git"
+  }
+}
