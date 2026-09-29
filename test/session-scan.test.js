@@ -269,11 +269,13 @@ test('session-scan: findSessionFiles 递归找会话日志（session[.vN].jsonl.
   assert.ok(!files.some((f) => f.endsWith('notes.txt')), '非会话文件不该被找到')
   for (const hit of found) {
     assert.equal(existsSync(hit.file), true)
-    assert.equal(hit.sessionDir, join(root, mangleCwd(spmsCwd), hit.file.split('/').slice(-2)[0]))
-    assert.equal(typeof hit.sessionId, 'string')
+    const dirName = hit.file.split('/').slice(-2)[0]
+    assert.equal(hit.sessionDir, join(root, mangleCwd(spmsCwd), dirName))
+    assert.equal(hit.sessionId, dirName, '会话 id 取会话目录名（不是固定的文件名）')
     assert.ok(hit.bytes > 0)
     assert.ok(hit.mtime > 0)
   }
+  assert.equal(new Set(found.map((f) => f.sessionId)).size, found.length, '多个会话不能共用一个 sessionId')
   assert.ok(existsSync(noiseDir))
 
   assert.equal(findSessionFiles([root], { limit: 1 }).length, 1)
