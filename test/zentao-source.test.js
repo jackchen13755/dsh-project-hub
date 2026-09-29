@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { candidatesFromStories, parsePager, parseStoryList, scanZentaoStories, storyUrl } from '../lib/zentao-source.js'
+import { candidatesFromStories, parsePager, parseStoryDetail, parseStoryList, scanZentaoStories, storyUrl } from '../lib/zentao-source.js'
 import { mergeCandidates } from '../lib/discover.js'
 import { extractRequirementNo } from '../lib/req-no.js'
 import { openStore, useTempHome } from './helpers.js'
@@ -67,18 +67,20 @@ test('storyUrl / parsePager：规范地址与分页值', () => {
   assert.equal(parsePager('没有任何分页信息').total, null)
 })
 
-test('candidatesFromStories：只收标题带需求号的，并按需求号去重', () => {
+test('candidatesFromStories：号优先取标题里的，没有就用 storyID；同号去重', () => {
+  // 用户给的 join key：禅道 storyID 就是需求号（storyID=5783 ↔ 分支 …-5783 ↔ wiki 页）
   const stories = [
-    { storyId: '1', title: '【5922】Queue 数据记录', url: 'u1', status: '激活', openedBy: 'Zhang San' },
-    { storyId: '2', title: '普通需求没有号', url: 'u2' },
-    { storyId: '3', title: '【5922】重复的需求单', url: 'u3' },
+    { storyId: '5922', title: '【5922】Queue 数据记录', url: 'u1', status: '激活', openedBy: 'Zhang San' },
+    { storyId: '5783', title: 'DBF活动风控支持', url: 'u2', noFromDetail: '5783', wikiUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=159221810' },
+    { storyId: '5922', title: '【5922】重复的需求单', url: 'u3' },
   ]
   const candidates = candidatesFromStories(stories, { extractNo: extractRequirementNo })
-  assert.equal(candidates.length, 1)
-  assert.equal(candidates[0].no, '5922')
-  assert.equal(candidates[0].storyUrl, 'u1')
-  assert.equal(candidates[0].status, '激活')
-  assert.equal(candidates[0].title_from, 'zentao')
+  assert.equal(candidates.length, 2, '同号去重')
+  const byNo = new Map(candidates.map((c) => [c.no, c]))
+  assert.equal(byNo.get('5922').storyUrl, 'u1')
+  assert.equal(byNo.get('5922').status, '激活')
+  assert.equal(byNo.get('5922').title_from, 'zentao')
+  assert.equal(byNo.get('5783').wikiUrl.includes('pageId=159221810'), true, '描述里的 wiki 跟着候选走')
 })
 
 test('scanZentaoStories：每个产品一次请求（这个实例不支持 pageID 翻页），如实报告该产品总数', async () => {
@@ -92,13 +94,57 @@ test('scanZentaoStories：每个产品一次请求（这个实例不支持 pageI
     }
     return { ok: true, text: PAGE('') }
   }
-  const result = await scanZentaoStories({ fetchText, productIds: ['1', '9'] })
-  assert.equal(result.calls, 2, '两个产品两次请求')
+  const result = await scanZentaoStories({ fetchText, productIds: ['1', '9'], withDetail: false })
+  assert.equal(result.calls, 2, '两个产品两次请求（本用例只测列表路径）')
   assert.equal(result.pagination, false)
   assert.equal(result.stories.length, 20)
   assert.equal(result.products[0].total, 461, '报告里要写清该产品共多少条')
   assert.equal(result.products[0].fetched, 20, '以及本次取了多少条')
   assert.equal(result.products[1].fetched, 0)
+})
+
+test('parseStoryDetail：storyID 就是需求号，描述区里的 wiki 就是需求文档（用户给的 join key）', () => {
+  const html = `<html><head><title>STORY #5783 DBF活动风控支持 - 数据中心 - 禅道</title></head><body>
+    <div class='detail-content article-content'><p>需求文档：<a href='https://wiki.example.com/pages/viewpage.action?pageId=159221810'>https://wiki.example.com/pages/viewpage.action?pageId=159221810</a></p>
+    <p>背景：活动风控…</p></div></div></body></html>`
+  const detail = parseStoryDetail(html)
+  assert.equal(detail.noFromTitle, '5783', 'STORY #5783 → 需求号')
+  assert.equal(detail.storyTitle, 'DBF活动风控支持')
+  assert.equal(detail.wikiUrl, 'https://wiki.example.com/pages/viewpage.action?pageId=159221810')
+  assert.equal(detail.wikiPageId, '159221810')
+  assert.match(detail.description, /活动风控/)
+})
+
+test('禅道候选：需求号优先用详情/标题里的号，其次 storyID；并把描述里的 wiki 当文档地址', () => {
+  const stories = [
+    { storyId: '5783', title: 'DBF活动风控支持', url: 'u1', status: '激活', openedBy: 'Zhang San', noFromDetail: '5783', wikiUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=159221810' },
+    { storyId: '6001', title: '没有号的普通单', url: 'u2' },
+    { storyId: '5922', title: '【5922】Queue 数据记录', url: 'u3' },
+  ]
+  const candidates = candidatesFromStories(stories, { extractNo: extractRequirementNo })
+  const byNo = new Map(candidates.map((c) => [c.no, c]))
+  assert.equal(byNo.has('5783'), true, '详情的 STORY #N')
+  assert.equal(byNo.get('5783').wikiUrl.includes('pageId=159221810'), true)
+  assert.equal(byNo.has('6001'), true, '没有号就拿 storyID 当需求号（本团队 storyID == 需求号）')
+  assert.equal(byNo.has('5922'), true, '列表标题里的【N】也认')
+})
+
+test('scanZentaoStories：顺带拉详情（拿 wiki 链接），并统计 detail 数', async () => {
+  const fetchText = async (url) => {
+    if (url.includes('f=view&storyID=')) {
+      const id = url.match(/storyID=(\d+)/)[1]
+      return { ok: true, text: `<html><head><title>STORY #${id} 需求 ${id} - 禅道</title></head><body><div class='detail-content article-content'>https://wiki.example.com/pages/viewpage.action?pageId=1${id}</div></div></body></html>` }
+    }
+    const rows = ROW(5783, 'DBF活动风控支持', 'Zhang San', '激活') + ROW(5784, '另一个需求', 'Li Si', '激活')
+    return { ok: true, text: PAGE(rows) }
+  }
+  const result = await scanZentaoStories({ fetchText, productIds: ['1'], withDetail: true })
+  assert.equal(result.products[0].details, 2, '两条都拉了详情')
+  assert.equal(result.stories[0].wikiUrl.includes('pageId=15783'), true)
+  assert.equal(result.stories[0].noFromDetail, '5783')
+  const candidates = candidatesFromStories(result.stories, { extractNo: extractRequirementNo })
+  assert.equal(candidates.length, 2)
+  assert.equal(candidates[0].no, '5783')
 })
 
 test('mergeCandidates：禅道来源是权威 —— 标题/状态以它为准，分数最高', () => {
@@ -117,6 +163,13 @@ test('mergeCandidates：禅道来源是权威 —— 标题/状态以它为准�
   assert.equal(item.openedBy, 'Zhang San')
   assert.ok(item.docUrl && item.codeCommits === 3, '文档与代码信息不丢')
   assert.ok(item.signals.includes('禅道需求单（权威来源）'))
+  // 禅道描述里的 wiki 也能当文档地址
+  const withWiki = mergeCandidates({
+    fromStories: [{ no: '5783', title: 'DBF活动风控支持', storyUrl: 'https://zentao.example.com/x', wikiUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=159221810' }],
+    myModules: new Set(),
+    today: '2026-09-29',
+  })
+  assert.equal(withWiki[0].docUrl, 'https://wiki.example.com/pages/viewpage.action?pageId=159221810', '禅道描述里的 wiki 直接当文档')
   // 打分：禅道 4 + 文档 2 + 代码 2 + 近 90 天改过代码 3 + 近 90 天改过文档 3 = 14
   assert.equal(item.score, 14)
 })
