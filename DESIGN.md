@@ -113,6 +113,7 @@
 | POST | `/requirements/save` | `{ id?,no?,project,title?,docUrl?,wbsUrl?,designUrl?,uiUrl?,…Note?,links?:[{kind,url,title?,note?}],replaceLinks?,status?,priority?,tags?,readTitle? }` | `{ ok, requirement（含 links）, titleRead:{title,source}\|null, linkKinds }` |
 | POST | `/requirements/link/add` | `{ id, kind, url, title?, note? }` | `{ ok, link, links:[...] }` |
 | POST | `/requirements/link/remove` | `{ id, linkId? \| kind?+url? }` | `{ ok, removed, links:[...] }` |
+| POST | `/requirements/status` | `{ id, status }`（只改状态，严格校验 7 个正式状态 + 中文别名；卡片下拉与「开新会话自动置开发中」都走它） | `{ ok, changed, requirement }` |
 | POST | `/requirements/archive` | `{ id, archived? }` | `{ ok, changed, requirement }` |
 | POST | `/requirements/delete` | `{ id }` | `{ ok, deleted }`（**硬删**：连同该需求的全部链接） |
 | GET | `/logs` | `project?,requirement?,from?,to?,kind?,q?,limit?,offset?` | `{ ok, total, items:[{id,date,projectId,requirementId,kind,title,detail,minutes,source,sessionId,evidence}] }` |
@@ -156,6 +157,12 @@
 需求表单里 **UI 设计 / 需求文档 / WBS / 后端设计** 四类各有「＋ 添加一条」，每条可填 URL / 标题 / 备注、
 可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
 数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
+
+**状态**：卡片上的状态下拉直接改（`POST /requirements/status`，只碰 `status` + `updated_at`，
+不重写标题/链接/项目）；`setRequirementStatus` **严格校验**（`normStatus` 对未知值原样透传，
+所以这里用 `REQ_STATUSES.includes()` 二次卡一道，避免下拉/接口写进拼错的状态）。
+点「开新会话」时若状态不是 `developing` 就**先置开发中再开会话**（顺序有意：开会话失败也不影响状态；
+`shouldMarkDeveloping()` 决定要不要写）。
 
 **「开新会话」（卡片与详情各一个按钮）**：宿主 `POST /open-session` 解析需求 → 渲染简报 →
 把项目目录登记成宿主 workspace（`ctx.workspaceRegistry.create`），返回 `workspace.id + prompt`；

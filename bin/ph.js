@@ -214,6 +214,22 @@ async function main() {
       const res = store.archiveRequirement(id, sub === 'archive')
       return out(res, res.changed ? `已${sub === 'archive' ? '归档' : '恢复'}需求 ${id}` : `没找到需求 ${id}`)
     }
+    // 只改状态（卡片下拉 / 开新会话自动置「开发中」同款语义）
+    if (sub === 'status') {
+      const id = positional[2] ?? flags.id
+      const next = flags.set ?? positional[3]
+      if (!id || !next) {
+        console.error('用法：dsh-ph req status <需求ID> --set developing（可用 draft/planning/developing/testing/released/paused/dropped）')
+        return 2
+      }
+      const res2 = store.setRequirementStatus(id, next)
+      if (!res2.ok) {
+        console.error(res2.error)
+        return 1
+      }
+      return out(res2, `需求 ${id} 状态 → ${res2.requirement.status}`)
+    }
+
     // 彻底删除（不可恢复；归档视图里用得着）
     if (sub === 'delete') {
       const id = positional[2]
@@ -345,6 +361,10 @@ async function main() {
 }
 
 main()
+  .then((code) => {
+    // 子命令可以直接 `return 1/2` 表达失败（退出码让脚本能判）
+    if (typeof code === 'number' && code !== 0) process.exitCode = code
+  })
   .catch((error) => {
     console.error(`执行失败：${error?.stack ?? error}`)
     process.exitCode = 1
