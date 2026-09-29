@@ -18,6 +18,7 @@
 | 手动补录 | 「今天解决了 bug 55036」这类记录随手加，可关联需求、填耗时 |
 | 检索 | 按项目 / 需求 / 日期区间 / 类型 / 关键词搜索，另有按天开发报表 |
 | 可编辑 | 需求（标题/状态/优先级/标签/全部链接）与开发记录（日期/项目/需求号/类型/标题/详情/耗时）都能改；改过的扫描记录不会被下次增量扫描覆盖 |
+| 开新会话 | 需求卡片/详情的「开新会话」：自动把项目目录登记成宿主 workspace → 在该工作区新建会话 → 把**需求简报**（ID/标题/项目/状态 + 全部链接 + 最近开发记录 + 任务提示）作为首条消息发进去；任何一步失败都会把简报复制到剪贴板并说明原因 |
 | 归档 | 需求、开发记录、项目都能归档与恢复；默认列表只显示未归档（`archived=exclude\|only\|include`） |
 
 ## 安装
@@ -61,10 +62,11 @@ dev_inject_plugin { "dir": "<本插件目录>" }
 | --- | --- |
 | `ph_save_requirement` | 保存/更新需求（id/no/project/title/docUrl/wbsUrl/designUrl/**uiUrl**/status/tags，**links 可多条**） |
 | `ph_link` | 链接增删查：`add` / `remove` / `list`（doc 需求文档 · wbs · design 后端设计 · ui UI 设计，每类可多条） |
+| `ph_brief` | 把一条需求渲染成可直接使用的**简报/提示词**（含全部链接与最近开发记录），面板「开新会话」用的就是同一份文本 |
 | `ph_get_requirement` | 读一条需求 + 它的开发记录 + 按天活动 |
 | `ph_list_requirements` | 列需求（项目 / 关键词 / 状态 / 归档三态） |
 | `ph_list_projects` | 列台账项目 + 候选项目（工作区 / 注册表 / 会话） |
-| `ph_log_work` | 手动加一条开发记录（kind=dev/bug/doc/review/meeting/release/other） |
+| `ph_log_work` | 新增**或编辑**一条开发记录（传 `id` 即编辑；kind=dev/bug/doc/review/meeting/release/other） |
 | `ph_search` | 跨需求 / 记录 / 按天活动检索 |
 | `ph_scan_sessions` | 扫描会话（**只做增量**：mtime+size 未变的会话跳过；`dryRun` 只报告） |
 | `ph_report` | 开发报表（每天 × 项目 × 需求） |
@@ -100,7 +102,7 @@ node bin/ph.js title https://example.com/doc
 前缀 `/project-hub/api`：`GET /status`、`GET /projects`、`POST /projects/add|/projects/archive`、
 `GET /requirements`、`GET /requirements/get`、`POST /requirements/save|/requirements/link/add|/requirements/link/remove|/requirements/archive|/requirements/delete`、
 `GET /logs`、`POST /logs/add|/logs/archive|/logs/delete`、`GET /search`、`GET /report`、
-`POST /scan`、`POST /doc-title`、`GET /export`。完整字段见 `DESIGN.md` §6。
+`POST /scan`、`POST /doc-title`、`GET /brief`、`POST /open-session`、`GET /export`。完整字段见 `DESIGN.md` §6。
 
 ## 实现要点（踩过的坑）
 

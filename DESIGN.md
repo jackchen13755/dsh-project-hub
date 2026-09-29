@@ -89,12 +89,14 @@
 | POST | `/scan` | `{ since?,dryRun?,limit? }`（只做增量；传 `full`/`rebuild` 会在响应里回 `ignored` + `note`） | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails, ignored? }` |
 | GET | `/report` | `from?,to?,project?` | `{ ok, days:[{date,projects:[{projectId,projectName,logCount,requirements:[{id,title,msgs,toolCalls,lastTime}]}]}], totals }` |
 | POST | `/doc-title` | `{ url?,path? }` | `{ ok, title, source }` |
+| GET | `/brief` | `id?,project?,task?,logs?` | `{ ok, brief, project:{id,name,root}, requirement:{id,title,status,links} }` |
+| POST | `/open-session` | `{ id, task?, logs? }` | `{ ok, prompt, project, workspace:{id,path,title,created}\|null, workspaceError, canCreate, requirement }` |
 
 ## 7. Agent 工具面
 
 `ph_save_requirement` · `ph_get_requirement` · `ph_list_requirements` · `ph_list_projects` ·
-`ph_log_work` · `ph_link`（链接 add/remove/list）· `ph_search` · `ph_scan_sessions` · `ph_report` ·
-`ph_archive` · `ph_doc_title`
+`ph_log_work`（新增/编辑）· `ph_link`（链接 add/remove/list）· `ph_brief`（需求简报/提示词）·
+`ph_search` · `ph_scan_sessions` · `ph_report` · `ph_archive` · `ph_doc_title`
 
 ## 8. 面板（lib/client.js）
 
@@ -114,3 +116,9 @@
 需求表单里 **UI 设计 / 需求文档 / WBS / 后端设计** 四类各有「＋ 添加一条」，每条可填 URL / 标题 / 备注、
 可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
 数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
+
+**「开新会话」（卡片与详情各一个按钮）**：宿主 `POST /open-session` 解析需求 → 渲染简报 →
+把项目目录登记成宿主 workspace（`ctx.workspaceRegistry.create`），返回 `workspace.id + prompt`；
+客户端再用能力探测式调用建会话并投喂首条消息（本机实测链路）：
+`sessions.create({ workspaceId })` → `sessions.open(id)` → `sessions.scope(id).get('conversation').send(prompt)`，
+拿不到 scope 时退到 `sessions.using(id, {}, binding => …)`；任何一步失败都**复制简报到剪贴板**并如实说明原因。
