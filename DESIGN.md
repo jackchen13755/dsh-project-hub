@@ -17,8 +17,9 @@
 | --- | --- | --- |
 | `meta` | 键值 | `schema_version`、`last_scan_at` |
 | `projects` | 项目台账 | `id`(slug) `name` `root` `remote` `aliases` `kind` `last_seen_at` |
-| `requirements` | 需求台账（按需求 ID 唯一） | `id` `no` `title` `project_id` `status` `priority` `doc_url` `doc_title` `doc_local` `wbs_url` `wbs_note` `design_url` `design_note` `tags` `extra` `last_worked_at` |
-| `work_logs` | 开发记录（手工 + 扫描） | `date` `project_id` `requirement_id` `kind` `title` `detail` `minutes` `source` `session_id` `evidence` |
+| `requirements` | 需求台账（按需求 ID 唯一） | `id` `no` `title` `project_id` `status` `priority` `tags` `extra` `last_worked_at` `archived_at` + 各类**主链接镜像** `doc_url/doc_title`、`wbs_url/wbs_note`、`design_url/design_note`、`ui_url/ui_note` |
+| `requirement_links` | **链接事实源**（每类可多条） | `requirement_id` `kind`(doc/wbs/design/ui/other) `url` `title` `note` `sort`，唯一键 `(requirement_id, kind, url)` |
+| `work_logs` | 开发记录（手工 + 扫描） | `date` `project_id` `requirement_id` `kind` `title` `detail` `minutes` `source` `session_id` `evidence` `archived_at` |
 | `activity` | 扫描派生的「天 × 项目 × 需求 × 会话」聚合 | `date` `project_id` `requirement_id` `session_id` `msgs` `tool_calls` `first_time` `last_time` `sample` |
 | `scanned_sessions` | 扫描水位（增量） | `session_id` `path` `cwd` `project_id` `mtime` `bytes` `days` `scanned_at` |
 
@@ -26,6 +27,11 @@
   用显示名而不是 slug，是因为同一个产品的多个仓库（`work/spms` 与 `work/spms-ui/spms`）目录名相同、
   slug 不同；用显示名可让同一个需求（SPMS-5921）只占一条台账，而每条开发记录仍保留自己的
   `project_id`，报表照样能区分是哪个仓库。
+- **链接是多条模型（v4）**：UI 设计 / 需求文档 / WBS / 后端设计 / 其它，**每类都可以多条**；
+  `requirement_links` 是事实源，`requirements` 的旧列只是「各类第一条链接」的镜像（老接口继续可用）。
+  写入语义：`links:[{kind,url,title,note}]` 按 `(kind,url)` upsert；`replaceLinks:true` 时按类整体替换
+  （只动传了的类别）；单值字段 `docUrl/wbsUrl/designUrl/uiUrl` = **替换该类主链接**（换 URL 会清空旧标题）。
+  文档类链接缺标题会逐条读回（一次保存最多 3 条，避免贴十几条链接时打爆网络）。
 - 扫描生成的工作记录幂等：唯一索引 `(date, project_id, requirement_id, session_id) WHERE source='session-scan'`。
 - 搜索用 `LIKE` 子串匹配（数据量百级，实测毫秒级），中文不需要分词器。
 - `search().days` 与 `report().days` **同一口径**（扫描活动 + 手工记录都出现），避免面板两个视图对不上；
@@ -68,9 +74,12 @@
 | GET | `/status` | - | `{ ok, version, dbPath, counts:{projects,requirements,workLogs,activity,scannedSessions}, lastScanAt, scanIntervalMinutes }` |
 | GET | `/projects` | `cwd?` | `{ ok, projects:[{id,name,root,remote,requirementCount,lastWorkedDate,lastSeenAt}], candidates:[{id,name,root,source}] }` |
 | POST | `/projects/add` | `{ name, root?, aliases? }` | `{ ok, project }` |
-| GET | `/requirements` | `project?,q?,status?,limit?,offset?` | `{ ok, total, items:[{id,no,title,projectId,projectName,status,docUrl,docTitle,wbsUrl,designUrl,tags,updatedAt,lastWorkedAt,workCount}] }` |
-| GET | `/requirements/get` | `id` | `{ ok, requirement, logs:[...], days:[{date,msgs,lastTime,sample}] }` |
-| POST | `/requirements/save` | `{ id?,no?,project,title?,docUrl?,wbsUrl?,wbsNote?,designUrl?,designNote?,status?,priority?,tags?,readTitle? }` | `{ ok, requirement, titleRead:{title,source}\|null }` |
+| GET | `/requirements` | `project?,q?,status?,archived?,limit?,offset?` | `{ ok, total, items:[{id,no,title,projectId,projectName,status,tags,updatedAt,lastWorkedAt,workCount,archivedAt,links:[{id,kind,kindLabel,url,title,note}]}] }` |
+| GET | `/requirements/get` | `id` | `{ ok, requirement（含 links 与各类主链接字段）, logs:[...], days:[...] }` |
+| POST | `/requirements/save` | `{ id?,no?,project,title?,docUrl?,wbsUrl?,designUrl?,uiUrl?,…Note?,links?:[{kind,url,title?,note?}],replaceLinks?,status?,priority?,tags?,readTitle? }` | `{ ok, requirement（含 links）, titleRead:{title,source}\|null, linkKinds }` |
+| POST | `/requirements/link/add` | `{ id, kind, url, title?, note? }` | `{ ok, link, links:[...] }` |
+| POST | `/requirements/link/remove` | `{ id, linkId? \| kind?+url? }` | `{ ok, removed, links:[...] }` |
+| POST | `/requirements/archive` | `{ id, archived? }` | `{ ok, changed, requirement }` |
 | POST | `/requirements/delete` | `{ id }` | `{ ok, deleted }` |
 | GET | `/logs` | `project?,requirement?,from?,to?,kind?,q?,limit?,offset?` | `{ ok, total, items:[{id,date,projectId,requirementId,kind,title,detail,minutes,source,sessionId,evidence}] }` |
 | POST | `/logs/add` | `{ date?,project,requirement?,kind?,title,detail?,minutes? }` | `{ ok, log }` |
@@ -83,10 +92,17 @@
 ## 7. Agent 工具面
 
 `ph_save_requirement` · `ph_get_requirement` · `ph_list_requirements` · `ph_list_projects` ·
-`ph_log_work` · `ph_search` · `ph_scan_sessions` · `ph_report`
+`ph_log_work` · `ph_link`（链接 add/remove/list）· `ph_search` · `ph_scan_sessions` · `ph_report` ·
+`ph_archive` · `ph_doc_title`
 
 ## 8. 面板（lib/client.js）
 
-会话 Tab 内的 `conversation.view` 槽位（与 dsh-memory-core 同款注册写法），数据全部走上面的
-HTTP 契约：搜索框 + 项目/日期/类型筛选 → 需求台账卡片 / 开发日志列表（两个视图）+ 手动添加表单
-+ 一键扫描（显示上次扫描结果）。
+**座位**：宿主右侧边栏页签 —— `ctx.inject(['sidebarRightTabs'])` 注册页签类型（`id`/`kind` 全局唯一）、
+`slots.register('sidebar.right.pane.tab', { key: TYPE_ID })` 注册主体、`…pane.tab.title` 注册标题，
+`sidebarRight.openTab(KIND)` 打开；**入口按钮**走 `sidebar.footer.action`（侧边栏底部「📋 项目管理」）。
+内联渲染约束：根节点 `flex:1 1 auto` 撑满座位、滚动区 `min-height:0`，不渲染悬浮层/固定抽屉。
+
+**内容**：工具栏（搜索 + 项目下拉 + 日期区间 + 类型 + 只看已归档 + 扫描 + 状态行）→ 需求台账卡片
+（链接按类展示，每类带条数）/ 开发日志列表 → 两个折叠表单。需求表单里 **UI 设计 / 需求文档 / WBS /
+后端设计** 四类各有「＋ 添加一条」，每条可填 URL / 标题 / 备注、可单条删除，「读标题」按条读回；
+详情里还能直接加链接、逐条删除。数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。

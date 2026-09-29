@@ -19,14 +19,28 @@ function parseArgs(list) {
     if (token.startsWith('--')) {
       const key = token.slice(2)
       const next = list[i + 1]
-      if (next === undefined || next.startsWith('--')) flags[key] = true
-      else {
-        flags[key] = next
-        i += 1
-      }
+      const value = next === undefined || next.startsWith('--') ? true : next
+      if (next !== undefined && !next.startsWith('--')) i += 1
+      // 同一个 flag 出现多次 → 收集成数组（`--link doc=A --link ui=B`）
+      if (flags[key] === undefined) flags[key] = value
+      else if (Array.isArray(flags[key])) flags[key].push(value)
+      else flags[key] = [flags[key], value]
     } else positional.push(token)
   }
   return { flags, positional }
+}
+
+/** `--link kind=url`（或 `--link url`，默认 doc）→ [{kind,url}]。 */
+function parseLinkFlags(value) {
+  const list = value === undefined ? [] : Array.isArray(value) ? value : [value]
+  return list
+    .map((entry) => {
+      const text = String(entry)
+      const eq = text.indexOf('=')
+      if (eq === -1) return { kind: 'doc', url: text }
+      return { kind: text.slice(0, eq).trim(), url: text.slice(eq + 1).trim() }
+    })
+    .filter((link) => link.url)
 }
 
 const { flags, positional } = parseArgs(argv)
@@ -102,6 +116,10 @@ async function main() {
         wbsNote: typeof flags['wbs-note'] === 'string' ? flags['wbs-note'] : undefined,
         designUrl: typeof flags.design === 'string' ? flags.design : undefined,
         designNote: typeof flags['design-note'] === 'string' ? flags['design-note'] : undefined,
+        uiUrl: typeof flags.ui === 'string' ? flags.ui : undefined,
+        uiNote: typeof flags['ui-note'] === 'string' ? flags['ui-note'] : undefined,
+        links: parseLinkFlags(flags.link),
+        replaceLinks: flags['replace-links'] === true,
         status: typeof flags.status === 'string' ? flags.status : undefined,
         priority: typeof flags.priority === 'string' ? flags.priority : undefined,
         tags: typeof flags.tags === 'string' ? flags.tags.split(',') : undefined,
@@ -111,7 +129,8 @@ async function main() {
       return out(
         res,
         `${res.created ? '已新建' : '已更新'}需求 ${r.id}${r.title ? ` · ${r.title}` : ''}（项目 ${r.projectName ?? r.projectId}，状态 ${r.status}）` +
-          (r.docTitle ? `\n文档标题：${r.docTitle}` : '') +
+          `\n链接 ${(r.links ?? []).length} 条：` +
+          (r.links ?? []).map((l) => `\n  · [${l.kindLabel}] ${l.url}${l.title ? `  《${l.title}》` : ''}${l.note ? `（${l.note}）` : ''}`).join('') +
           (res.titleRead && !res.titleRead.ok ? `\n（标题未读到：${res.titleRead.error}）` : ''),
       )
     }
@@ -122,7 +141,7 @@ async function main() {
         console.error(`没找到需求 ${id}`)
         process.exit(2)
       }
-      const req = store.rowToRequirement(store.requirementDetail(row.id))
+      const req = store.attachLinksOne(store.requirementDetail(row.id))
       const logs = store.listLogs({ requirement: row.id, archived: 'include', limit: 50 })
       const days = store.timeline({ requirement: row.id, limit: 30 })
       return out(
@@ -130,10 +149,8 @@ async function main() {
         [
           `${req.id}${req.title ? ` · ${req.title}` : ''}`,
           `项目 ${req.projectName ?? req.projectId} / 状态 ${req.status}${req.archivedAt ? ' / 已归档' : ''}`,
-          req.docUrl ? `需求文档：${req.docUrl}` : '',
-          req.docTitle ? `  标题：${req.docTitle}` : '',
-          req.wbsUrl ? `WBS：${req.wbsUrl}` : '',
-          req.designUrl ? `后端设计：${req.designUrl}` : '',
+          `链接 ${(req.links ?? []).length} 条：`,
+          ...(req.links ?? []).map((l) => `  · [${l.kindLabel}] ${l.url}${l.title ? `  《${l.title}》` : ''}${l.note ? `（${l.note}）` : ''}`),
           `开发记录 ${logs.total} 条：`,
           ...logs.items.slice(0, 20).map((l) => `  ${l.date} [${l.kind}] ${l.title ?? ''}${l.source === 'session-scan' ? '（扫描）' : ''}`),
           `按天活动 ${days.length} 天：`,
@@ -142,6 +159,42 @@ async function main() {
           .filter(Boolean)
           .join('\n'),
       )
+    }
+    // 链接子命令：`req link add --id SPMS-5921 --kind ui --url …` / `list` / `remove --link-id N`
+    if (sub === 'link') {
+      const action = positional[2] ?? 'list'
+      const id = typeof flags.id === 'string' ? flags.id : positional[3]
+      const row = id ? store.getRequirement(id, { project: flags.project }) : null
+      if (!row) {
+        console.error(`没找到需求 ${id ?? '(缺少 --id)'}`)
+        process.exit(2)
+      }
+      if (action === 'add') {
+        if (typeof flags.url !== 'string') {
+          console.error('add 需要 --url')
+          process.exit(2)
+        }
+        let title = typeof flags.title === 'string' ? flags.title : null
+        if (!title && (!flags.kind || String(flags.kind).toLowerCase() === 'doc') && flags['no-title-read'] !== true) {
+          const res = await resolveDocTitle(flags.url)
+          if (res.ok) title = res.title
+        }
+        const link = store.upsertLink(row.id, { kind: flags.kind ?? 'doc', url: flags.url, title, note: typeof flags.note === 'string' ? flags.note : null })
+        store.syncPrimaryMirrors(row.id)
+        return out({ link, links: store.listLinks(row.id) }, `已添加 [${link.kindLabel}] ${link.url}${link.title ? `  《${link.title}》` : ''}`)
+      }
+      if (action === 'remove') {
+        const removed = store.removeLink({
+          id: flags['link-id'] !== undefined ? Number(flags['link-id']) : null,
+          requirementId: row.id,
+          kind: typeof flags.kind === 'string' ? flags.kind : null,
+          url: typeof flags.url === 'string' ? flags.url : null,
+        })
+        store.syncPrimaryMirrors(row.id)
+        return out({ removed, links: store.listLinks(row.id) }, removed ? `已删除 ${removed} 条链接` : '没找到要删的链接（用 req link list 看 id）')
+      }
+      const links = store.listLinks(row.id)
+      return out({ links }, [`${row.id} 的链接 ${links.length} 条：`, ...links.map((l) => `  #${l.id} [${l.kindLabel}] ${l.url}${l.title ? `  《${l.title}》` : ''}${l.note ? `（${l.note}）` : ''}`)].join('\n'))
     }
     if (sub === 'list' || sub === undefined) {
       const res = store.listRequirements({

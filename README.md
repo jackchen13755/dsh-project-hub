@@ -10,8 +10,9 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 需求台账 | 按需求 ID 一条记录：需求文档、WBS、后端设计文档、所属项目、状态、优先级、标签 |
-| 自动读标题 | 保存需求文档时把文档标题读回来（本地 md 的 front-matter / `# H1`、网页的 `<title>` / `<h1>`） |
+| 需求台账 | 按需求 ID 一条记录：需求文档、WBS、后端设计文档、**UI 设计链接**、所属项目、状态、优先级、标签 |
+| 链接可多条 | UI / 需求 / WBS / 设计 **每类都能加多条**（Figma、MasterGo、蓝湖…都算 UI），每条带标题与备注、可单条删除 |
+| 自动读标题 | 保存需求文档时把文档标题读回来（本地 md 的 front-matter / `# H1`、网页的 `<title>` / `<h1>`），文档类链接**逐条**读 |
 | 项目候选 | 项目从「当前工作区已有项目」里选：宿主工作区注册表 + 工作目录扫描 + 历史会话 cwd |
 | 会话扫描 | 定期解压 `$DSH_HOME/sessions/**/session*.jsonl.zstd`（多帧 zstd），按天 × 项目 × 需求归集，落成开发记录 |
 | 手动补录 | 「今天解决了 bug 55036」这类记录随手加，可关联需求、填耗时 |
@@ -51,7 +52,8 @@ dev_inject_plugin { "dir": "<本插件目录>" }
 
 | 工具 | 用途 |
 | --- | --- |
-| `ph_save_requirement` | 保存/更新需求（id/no/project/title/docUrl/wbsUrl/designUrl/status/tags） |
+| `ph_save_requirement` | 保存/更新需求（id/no/project/title/docUrl/wbsUrl/designUrl/**uiUrl**/status/tags，**links 可多条**） |
+| `ph_link` | 链接增删查：`add` / `remove` / `list`（doc 需求文档 · wbs · design 后端设计 · ui UI 设计，每类可多条） |
 | `ph_get_requirement` | 读一条需求 + 它的开发记录 + 按天活动 |
 | `ph_list_requirements` | 列需求（项目 / 关键词 / 状态 / 归档三态） |
 | `ph_list_projects` | 列台账项目 + 候选项目（工作区 / 注册表 / 会话） |
@@ -69,7 +71,12 @@ node bin/ph.js status                        # 台账概览
 node bin/ph.js scan [--limit 300]            # 增量扫会话（没变过的会话自动跳过）
 node bin/ph.js report [--from 2026-09-01 --to 2026-09-30] [--project spms]
 node bin/ph.js search 看板 --project spms --from 2026-09-01
-node bin/ph.js req save --no 5921 --project spms --doc https://… --wbs https://… --design https://…
+node bin/ph.js req save --no 5921 --project spms --title 房态看板 \
+  --link doc=https://…需求文档 --link doc=https://…需求补充 \
+  --link wbs=https://… --link design=https://… --link ui=https://figma… --link ui=https://mastergo…
+node bin/ph.js req link add --id SPMS-5921 --kind ui --url https://lanhu.example/v2
+node bin/ph.js req link list --id SPMS-5921
+node bin/ph.js req link remove --id SPMS-5921 --link-id 7
 node bin/ph.js req get SPMS-5921
 node bin/ph.js req list --archived only
 node bin/ph.js req archive SPMS-5921          # 恢复用 req restore
@@ -84,7 +91,7 @@ node bin/ph.js title https://example.com/doc
 ## HTTP 路由（面板/脚本用）
 
 前缀 `/project-hub/api`：`GET /status`、`GET /projects`、`POST /projects/add|/projects/archive`、
-`GET /requirements`、`GET /requirements/get`、`POST /requirements/save|/requirements/archive|/requirements/delete`、
+`GET /requirements`、`GET /requirements/get`、`POST /requirements/save|/requirements/link/add|/requirements/link/remove|/requirements/archive|/requirements/delete`、
 `GET /logs`、`POST /logs/add|/logs/archive|/logs/delete`、`GET /search`、`GET /report`、
 `POST /scan`、`POST /doc-title`、`GET /export`。完整字段见 `DESIGN.md` §6。
 
@@ -103,6 +110,11 @@ node bin/ph.js title https://example.com/doc
    重启不丢拍；**不能**直接 `ctx.setInterval`（未 inject `timer` 服务会抛，整条 entry 加载失败）。
 7. **扫描只做增量**：水位是 `scanned_sessions.mtime+bytes`。activity 替换语义 + work_logs 部分唯一索引，
    保证「重扫同一会话不会翻倍」；提取规则改了要重新派生时用 schema 迁移清水位（v2 就是这么修 NaN 假 id 的）。
+8. **链接是多条模型（v4）**：`requirement_links` 是事实源（`(requirement_id, kind, url)` 唯一），
+   `requirements` 的旧列只是各类第一条的镜像，老接口/老面板不受影响；单值字段是「替换主链接」、
+   `links + replaceLinks` 才是整份状态保存（面板就是这么用的）。
+9. **迁移必须可重放**：SQLite 没有 `ALTER TABLE … ADD COLUMN IF NOT EXISTS`，所以 v4 写成
+   `run(db)` 函数式迁移（先查 `PRAGMA table_info`）；把 `schema_version` 退回旧版再重开的场景下也不会炸。
 
 ## 开发
 

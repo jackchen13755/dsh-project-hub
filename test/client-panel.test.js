@@ -190,3 +190,56 @@ test('纯函数：查询串拼装 / 日期 / 字典', () => {
   assert.equal(fmtTime(null), '-')
   assert.equal(KIND_LABEL.bug, '缺陷')
 })
+
+test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条）', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { LINK_LABEL, LINK_FORM_KINDS, renderLinkChips } = mod.__test
+
+  assert.deepEqual([...LINK_FORM_KINDS], ['doc', 'wbs', 'design', 'ui'])
+  assert.equal(LINK_LABEL.ui, 'UI 设计')
+  assert.equal(LINK_LABEL.design, '后端设计')
+
+  const links = [
+    { id: 1, kind: 'doc', kindLabel: '需求文档', url: 'https://doc.example/a', title: '需求说明书' },
+    { id: 2, kind: 'doc', kindLabel: '需求文档', url: 'https://doc.example/b', title: '需求补充' },
+    { id: 3, kind: 'ui', kindLabel: 'UI 设计', url: 'https://figma.example/x', title: '看板稿' },
+    { id: 4, kind: 'ui', kindLabel: 'UI 设计', url: 'https://mastergo.example/y', title: '移动端稿' },
+    { id: 5, kind: 'wbs', kindLabel: 'WBS', url: 'https://wbs.example/a', title: null },
+  ]
+  const chips = renderLinkChips(links, null)
+  const texts = collectStrings(chips).join('|')
+  assert.ok(texts.includes('需求文档(2)'), `类别要显示条数：${texts}`)
+  assert.ok(texts.includes('UI 设计(2)'))
+  assert.ok(texts.includes('需求说明书') && texts.includes('需求补充'))
+  assert.ok(texts.includes('移动端稿'))
+  const hrefs = chips.filter((c) => c && c.type === 'a').map((c) => c.props.href)
+  assert.equal(hrefs.length, 5, '每条链接都要可点开')
+
+  // 老数据回落：links 为空时用单值列渲染
+  const legacy = renderLinkChips([], { docUrl: 'https://doc.example/old', docTitle: '老文档', uiUrl: 'https://figma.example/old' })
+  const legacyHrefs = legacy.filter((c) => c && c.type === 'a').map((c) => c.props.href)
+  // 跨 vm realm 的数组不能直接 deepEqual，按值比
+  assert.equal(legacyHrefs.join('|'), 'https://doc.example/old|https://figma.example/old')
+
+  // 面板级：需求表单里四类都有「＋ 添加一条」
+  const calls = []
+  const React = fakeReact()
+  const mod2 = loadClient().def.factory(() => React)
+  const body = (() => {
+    const slotRegistrations = []
+    const ctx = {
+      inject: (deps, cb) => {
+        if (deps.includes('sidebarRightTabs')) cb({ sidebarRightTabs: { register: (p) => { calls.push(p); return () => {} } } })
+        if (deps.includes('sidebarRight')) cb({ sidebarRight: { openTab: () => {} } })
+        return () => {}
+      },
+      slots: { inject: (name, cb) => { cb(); return () => {} }, register: (p, render) => { slotRegistrations.push({ p, render }); return () => {} } },
+      effect: (fn) => fn(),
+    }
+    mod2.apply(ctx)
+    return slotRegistrations.find((r) => r.p.name === 'sidebar.right.pane.tab').render({ sessionId: null })
+  })()
+  assert.ok(body)
+  assert.equal(mod2.__test.LINK_FORM_KINDS.length, 4)
+})
