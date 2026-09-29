@@ -214,6 +214,12 @@ async function main() {
       const res = store.archiveRequirement(id, sub === 'archive')
       return out(res, res.changed ? `已${sub === 'archive' ? '归档' : '恢复'}需求 ${id}` : `没找到需求 ${id}`)
     }
+    // 彻底删除（不可恢复；归档视图里用得着）
+    if (sub === 'delete') {
+      const id = positional[2]
+      const deleted = store.deleteRequirement(id)
+      return out({ deleted }, deleted ? `已彻底删除需求 ${id}（不可恢复）` : `没找到需求 ${id}`)
+    }
   }
 
   if (cmd === 'log') {
@@ -270,6 +276,10 @@ async function main() {
     if (sub === 'archive' || sub === 'restore') {
       const res = store.archiveLog(Number(positional[2]), sub === 'archive')
       return out(res, res.changed ? `已${sub === 'archive' ? '归档' : '恢复'}记录 #${positional[2]}` : `没找到记录 #${positional[2]}`)
+    }
+    if (sub === 'delete') {
+      const deleted = store.deleteLog(Number(positional[2]))
+      return out({ deleted }, deleted ? `已彻底删除记录 #${positional[2]}（不可恢复）` : `没找到记录 #${positional[2]}`)
     }
   }
 

@@ -285,3 +285,32 @@ test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条�
   assert.ok(body)
   assert.equal(mod2.__test.LINK_FORM_KINDS.length, 4)
 })
+
+test('项目配色：同一项目恒定同色，不同项目基本不同色（浅深主题都可读的色板）', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { projectColor } = mod.__test
+
+  // 稳定性：同一个项目多次取色必须一致（跨渲染/跨会话都靠这个）
+  assert.equal(projectColor('spms'), projectColor('spms'))
+  assert.equal(projectColor('hs-config'), projectColor('hs-config'))
+  assert.match(projectColor('spms'), /^#[0-9a-f]{6}$/)
+  assert.equal(projectColor(''), 'inherit', '没有项目时不上色，跟随主题')
+
+  // 一组真实项目里至少要有多种颜色（否则「按项目区分」就白做了）
+  const ids = ['spms', 'spms-ui-spms', 'hs-config', 's360-mobile', 'ars-genesis', 'fo-portal', 'great-mobile', 'dsh-github']
+  const colors = new Set(ids.map((id) => projectColor(id)))
+  assert.ok(colors.size >= 4, `8 个项目至少 4 种颜色，实际 ${colors.size}`)
+})
+
+test('删除按钮：两段确认的文案状态机（只在归档视图出现）', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { deleteButtonLabel } = mod.__test
+
+  assert.equal(deleteButtonLabel(null, 'requirement', 'SPMS-1'), '删除')
+  assert.equal(deleteButtonLabel({ kind: 'requirement', id: 'SPMS-1' }, 'requirement', 'SPMS-1'), '确认删除？')
+  assert.equal(deleteButtonLabel({ kind: 'requirement', id: 'SPMS-1' }, 'requirement', 'SPMS-2'), '删除', '别的项不受影响')
+  assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'requirement', 7), '删除', '类型不同也不误触发')
+  assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'log', 7), '确认删除？')
+})

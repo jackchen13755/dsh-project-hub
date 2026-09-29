@@ -95,11 +95,11 @@
 | POST | `/requirements/link/add` | `{ id, kind, url, title?, note? }` | `{ ok, link, links:[...] }` |
 | POST | `/requirements/link/remove` | `{ id, linkId? \| kind?+url? }` | `{ ok, removed, links:[...] }` |
 | POST | `/requirements/archive` | `{ id, archived? }` | `{ ok, changed, requirement }` |
-| POST | `/requirements/delete` | `{ id }` | `{ ok, deleted }` |
+| POST | `/requirements/delete` | `{ id }` | `{ ok, deleted }`（**硬删**：连同该需求的全部链接） |
 | GET | `/logs` | `project?,requirement?,from?,to?,kind?,q?,limit?,offset?` | `{ ok, total, items:[{id,date,projectId,requirementId,kind,title,detail,minutes,source,sessionId,evidence}] }` |
 | POST | `/logs/add` | `{ date?,project,requirement?,kind?,title,detail?,minutes? }` | `{ ok, log }` |
 | POST | `/logs/update` | `{ id, date?,project?,requirement?,kind?,title?,detail?,minutes? }`（只改传了的字段；扫描派生的记录也能改，且不被重扫覆盖） | `{ ok, log }` |
-| POST | `/logs/delete` | `{ id }` | `{ ok }` |
+| POST | `/logs/delete` | `{ id }` | `{ ok, deleted }`（硬删，不可恢复） |
 | GET | `/search` | `q?,project?,requirement?,from?,to?,kind?,limit?` | `{ ok, requirements:[...], logs:[...], days:[{date,projects:[{projectId,projectName,requirements:[{id,title,msgs,lastTime}]}]}] }` |
 | POST | `/scan` | `{ since?,dryRun?,limit? }`（只做增量；传 `full`/`rebuild` 会在响应里回 `ignored` + `note`） | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails, ignored? }` |
 | GET | `/report` | `from?,to?,project?` | `{ ok, days:[{date,projects:[{projectId,projectName,logCount,requirements:[{id,title,msgs,toolCalls,lastTime}]}]}], totals }` |
@@ -121,8 +121,12 @@
 内联渲染约束：根节点 `flex:1 1 auto` 撑满座位、滚动区 `min-height:0`，不渲染悬浮层/固定抽屉。
 
 **内容（三个 tab 严格分开，不混在一起）**：
-- **需求台账**：筛选（搜索 / 项目 / 只看已归档）+ 需求卡片（链接按类分组，**类别胶囊与每条链接都可点**）+
+- **需求台账**：筛选（搜索 / 项目 / 只看已归档）+ 需求卡片（链接按类分组，**类别胶囊与每条链接都可点**；
+  **项目胶囊按项目稳定配色** —— 对项目 id 做哈希取 12 色中间调色板，同一项目永远同色）+
   「＋ 需求」新建 与「编辑」载入表单（`replaceLinks` 整份保存链接）；
+- **归档视图**（`只看已归档` 打开时）：顶部黄色提示条 + 每项多一个「删除」按钮。
+  删除是**硬删且两段确认**（第一次点变「确认删除？」，再点才真删；`deleteButtonLabel` 是这条状态的纯函数），
+  删需求会连带删掉它的全部链接；「恢复」则把条目放回日常列表；
 - **开发日志**：筛选（搜索 / 项目 / 日期区间 / 类型）+ 记录列表（「编辑」→ `POST /logs/update`）+
   「＋ 记录」新增；
 - **会话扫描**：扫描状态卡（上次扫描 / 周期 / 错误 / 会话文件·变更·跳过·活动·记录·天数）+
