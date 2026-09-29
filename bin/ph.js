@@ -386,12 +386,39 @@ async function main() {
           .map((r) => `  ${r.verdict === 'doc-stale' ? '⚠' : ' '} ${r.requirementId}　${r.verdict}　文档 ${r.docChangedAt ?? '-'} / 代码 ${r.codeLastAt ?? '-'} / 记录 ${r.sessionLastAt ?? '-'}`),
       ].join('\n'))
     }
+    if (sub === 'todos') {
+      const enabled = store.driftTodoEnabled()
+      if (flags.sync) {
+        if (!enabled) {
+          console.error('变更待办是关闭状态（默认）—— 先 dsh-ph drift todo-enable')
+          return 1
+        }
+        const synced = store.syncDriftTodos({ dueDays: n(flags.due, 0), force: true })
+        console.log(`同步完成：新建 ${synced.created} / 更新 ${synced.updated} / 自动关闭 ${synced.closed}`)
+      }
+      if (flags.done !== undefined) {
+        const closed = store.closeDriftTodo(flags.done, { reason: 'CLI 标记完成' })
+        console.log(closed.changed ? `已关闭待办 #${flags.done}` : `没找到开放的待办 #${flags.done}`)
+        return closed.changed ? 0 : 1
+      }
+      const items = store.listDriftTodos({ status: flags.status ?? 'open', limit: n(flags.limit, 100) })
+      return out({ enabled, items }, [
+        `变更待办（${enabled ? '已启用' : '默认关闭'}）：${items.length} 条`,
+        ...items.map((t) => `  #${t.id}　${t.requirement_id}　${t.title}${t.signal_date ? `（${t.signal_date}）` : ''}${t.due_at ? `　到期 ${t.due_at}` : ''}`),
+      ].join('\n'))
+    }
+    if (sub === 'todo-enable' || sub === 'todo-disable') {
+      const enabled = sub === 'todo-enable'
+      store.setDriftTodoEnabled(enabled)
+      const synced = enabled ? store.syncDriftTodos({ dueDays: n(flags.due, 0) }) : null
+      return out({ enabled: store.driftTodoEnabled(), synced }, `${enabled ? '已启用' : '已关闭'}变更待办${synced ? `：新建 ${synced.created} / 更新 ${synced.updated} / 自动关闭 ${synced.closed}` : ''}`)
+    }
     if (sub === 'list' || sub === undefined) {
       const rows = store.listDrift({ verdict: flags.verdict ?? null, limit: n(flags.limit, 200) })
       if (rows.length === 0) return out({ items: [] }, '还没有对账结果（先跑：dsh-ph drift refresh）')
       return out({ items: rows }, rows.map((r) => `  ${r.verdict === 'doc-stale' ? '⚠' : ' '} ${r.requirement_id}　${r.verdict}　文档 ${r.doc_changed_at ?? '-'} / 代码 ${r.code_last_at ?? '-'} / 记录 ${r.session_last_at ?? '-'}　${String(r.req_title ?? '').slice(0, 30)}`).join('\n'))
     }
-    console.error('drift 子命令：refresh [--id X] | list [--verdict doc-stale]')
+    console.error('drift 子命令：refresh [--id X] | list [--verdict doc-stale] | todos [--sync] [--done <id>] | todo-enable | todo-disable')
     return 2
   }
 

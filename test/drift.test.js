@@ -68,6 +68,10 @@ test('verdictOf：doc-newer / silent / unknown 的边界', () => {
   )
   assert.equal(verdictOf({ today: '2026-09-29' }).verdict, 'unknown')
   assert.equal(verdictOf({ codeLastAt: '2026-09-20', today: '2026-09-29' }).verdict, 'unknown')
+  // 有变更语义但**没有文档基准** → 也只能是 unknown（推不出"文档落后"，实测踩到假阳性待办）
+  const noBaseline = verdictOf({ sessionLastAt: '2026-09-28', signals: [{ date: '2026-09-28', text: '逻辑改成先扣库存', word: '改成' }], today: '2026-09-29' })
+  assert.equal(noBaseline.verdict, 'unknown')
+  assert.match(noBaseline.reason, /还没抓过文档快照/)
 })
 
 test('changeSignalsIn：只认文档更新之后、且带变更语义的记录', () => {
