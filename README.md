@@ -55,6 +55,13 @@ dev_inject_plugin { "dir": "<本插件目录>" }
 - 会话日志来源：`$DSH_HOME/sessions/**`（只读）与 `$DSH_HOME/sessions-archive/**`（若存在）
 - 表：`projects` / `requirements` / `work_logs` / `activity` / `scanned_sessions`（schema 见 `lib/schema.js`）
 
+## 设计文档
+
+- [DESIGN.md](DESIGN.md) §1–§8：已实现的形态（数据模型 / 扫描 / API / 工具面 / 面板）
+- [DESIGN.md](DESIGN.md) **§9 需求冲突预判与变更对账（方案设计，未实现）**：解决「新需求评审时看不出与
+  既有实现的冲突」与「需求变更没回写到文档」两个痛点 —— 需求↔代码影响索引、文档漂移三方对账、
+  一键评审影响报告、变更待办，含数据模型、采集命令、验收口径与分期顺序。
+
 ## 面板（右侧边栏页签）
 
 客户端半边（`lib/client.js`）在宿主右侧边栏注册一个页签 **项目管理**，内含**三个互相独立的 tab**：
