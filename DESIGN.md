@@ -59,6 +59,17 @@
 `http(s)` → 抓 HTML（10s 超时、256KB 截断）→ `<title>`（剥站点后缀）→ 首个 `<h1>`。
 `ph_save_requirement` 默认 `readTitle`，标题缺省时自动回填。
 
+**取页带登录态（`lib/page-fetch.js`，与 dsh-zentao-workbench 同款策略链）**：
+① 浏览器中继（`dsh-fetch-page` 守护进程 `127.0.0.1:9317` 的 `POST /forward`，扩展自动附带登录 Cookie）
+→ ② cookie jar（Netscape 格式：`$DSH_COOKIE_JAR` / `~/.config/zentao/cookies.txt` /
+`~/.dsh/storages/dsh-zentao-workbench/cookies.txt`，按 host 匹配、剔除过期）
+→ ③ 裸 fetch。**拿到登录页时**（`looksLikeLoginPage`：标题以 登录/登陆/login 开头，
+或「账号+密码」表单，或「请先登录」文案）不写标题，而是返回
+`{ ok:false, source:'needs-login', needsLogin:true, strategy, error }`（error 里带上每一跳的原因），
+避免把「登录」两个字当需求标题存进台账。
+> 坑：判定正则不能写 `(登录)\b` —— `\b` 只在「词字符/非词字符」交界成立，中文不是 `\w`，
+> `登录 - 禅道` 永远匹配不上（本项目实测踩过）。
+
 ## 5. 项目来源（R3）
 
 `lib/projects.js`：候选 = ① 当前会话 cwd 及其子目录里的 git 仓库；② 会话日志里出现过的 cwd；

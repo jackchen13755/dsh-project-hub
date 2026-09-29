@@ -146,6 +146,7 @@ function loadClientSession() {
     window: { __ModuleLoader__: { load: (def) => { captured = def } }, setInterval: () => 0, clearInterval: () => {} },
     document: { getElementById: () => null, createElement: () => ({ id: '', textContent: '' }), head: { appendChild: () => {} } },
     console,
+    URL,
     URLSearchParams,
     Date,
     JSON,

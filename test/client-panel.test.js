@@ -91,7 +91,7 @@ function loadClient() {  const code = readFileSync(CLIENT, 'utf8')
     createElement: () => ({ id: '', textContent: '' }),
     head: { appendChild: (el) => appended.push(el) },
   }
-  const sandbox = { window: windowStub, document: documentStub, console, URLSearchParams, Date, JSON, Math, Number, String, Object, Array, Error, Boolean }
+  const sandbox = { window: windowStub, document: documentStub, console, URL, URLSearchParams, Date, JSON, Math, Number, String, Object, Array, Error, Boolean, Promise, setTimeout }
   sandbox.globalThis = sandbox
   vm.createContext(sandbox)
   vm.runInContext(code, sandbox, { filename: 'lib/client.js' })
@@ -237,23 +237,32 @@ test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条�
   const texts = collectStrings(chips).join('|')
   assert.ok(texts.includes('需求文档 2'), `类别要显示条数：${texts}`)
   assert.ok(texts.includes('UI 设计 2'))
-  assert.ok(texts.includes('需求说明书') && texts.includes('需求补充'))
-  assert.ok(texts.includes('移动端稿'))
-  // 链接都要可点：5 条链接 + 3 个可点类别胶囊（doc / ui / wbs）
-  const hrefs = collectElements(chips)
+  // 卡片不再铺全量链接/URL：只有类别胶囊（点开 = 该类第 1 条），逐条查看与复制在详情里
+  assert.ok(!texts.includes('https://'), `卡片不该出现 URL 文本：${texts}`)
+  const anchors = collectElements(chips)
     .filter((el) => el.type === 'a')
     .map((el) => el.props.href)
-  assert.equal(hrefs.length, 8, '每条链接与每个类别胶囊都要可点')
-  assert.ok(hrefs.includes('https://figma.example/x'), '类别胶囊点开该类的第一条')
-  assert.ok(hrefs.every((href) => typeof href === 'string' && href.startsWith('http')), '不允许出现 href 为空的假链接')
+  assert.equal(anchors.length, 3, '每类只需一颗可点胶囊（doc / wbs / ui）')
+  assert.equal(anchors.join('|'), 'https://doc.example/a|https://wbs.example/a|https://figma.example/x')
+  // 单条的那类顺手给个复制按钮；多条的留给详情
+  const copies = collectElements(chips).filter((el) => el.type === 'button')
+  assert.equal(copies.length, 1, '只有单条类别（WBS）出现复制按钮')
+  assert.ok(String(copies[0].props.title).includes('https://wbs.example/a'))
 
-  // 老数据回落：links 为空时用单值列渲染
+  // 短链接标签：不铺全量 URL
+  const { shortUrlLabel } = mod.__test
+  assert.equal(shortUrlLabel('https://zen.example.com/index.php?m=doc&f=view&id=12'), 'zen.example.com/…/index.php')
+  assert.equal(shortUrlLabel('https://figma.example/file/abc123/Board'), 'figma.example/…/Board')
+  assert.ok(shortUrlLabel('not a url').length <= 44)
+
+  // 老数据回落：links 为空时用单值列渲染（各自单条 → 2 颗胶囊 + 2 个复制按钮）
   const legacy = renderLinkChips([], { docUrl: 'https://doc.example/old', docTitle: '老文档', uiUrl: 'https://figma.example/old' })
   const legacyHrefs = collectElements(legacy)
     .filter((el) => el.type === 'a')
     .map((el) => el.props.href)
   // 跨 vm realm 的数组不能直接 deepEqual，按值比
-  assert.equal(legacyHrefs.join('|'), 'https://doc.example/old|https://doc.example/old|https://figma.example/old|https://figma.example/old')
+  assert.equal(legacyHrefs.join('|'), 'https://doc.example/old|https://figma.example/old')
+  assert.equal(collectElements(legacy).filter((el) => el.type === 'button').length, 2, '单条类别各给一个复制按钮')
 
   // 面板级：需求表单里四类都有「＋ 添加一条」
   const calls = []
