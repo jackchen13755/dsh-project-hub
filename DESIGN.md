@@ -66,6 +66,22 @@
 > 实测坑：有人在「标签」框里贴了 Figma 设计稿链接（应填在「UI 设计」链接里）。所以
 > `tagSuggestions` 会把含 `://`、超过 32 字的条目挡在建议之外，避免这种脏数据扩散成"标签"。
 
+## 3.8 文档结构化信息（`lib/doc-meta.js`，schema v5）
+
+从需求文档页面里读四类东西（**全部结论来自一条真实 Confluence 页面的实测**）：
+
+| 信息 | 来源 | 备注 |
+| --- | --- | --- |
+| 标题 | `<h1 id="title-text">` → `<title>`（剥 ` - 空间 - 站点` 后缀）→ 正文 h1 | Confluence **REST 的 `title` 最干净**，有 pageId 时优先用它 |
+| **谁创建的** | Confluence `/rest/api/content/<id>?expand=history,version,space` | ⚠️ 服务端 HTML **没有**创建者；页面 JS 包里那行 `//作者 xxx@…` 是**插件作者注释**，拿它当创建者就是误判（实测踩到） |
+| **谁是产品** | 正文「相关人员」表：`产品：X` / `UI：Y` / `前端：Z` / `后端：…` / `QA：…` | `产品经理 > 产品负责人 > 产品` 依次取；全量角色塞 `extra.roles`（不为每个角色加列） |
+| **UI 设计链接** | 正文文本 **+ `<a href>`**（`PC端：<figma>` / `APP端：<figma>`） | 只在 `href` 里的也要收（夹具先行暴露了这个漏洞）；保存时按 `(requirement_id,'ui',url)` **OR IGNORE** 并入，重复保存不会长两条 |
+
+保存路径（`store.saveRequirement`）：**先读文档 → 再定需求号/需求 ID → 落 creator/product/roles → 并入 UI 链接**，
+返回 `{ noFromTitle, metaFromDoc, uiFromDoc }` 供面板与工具提示「需求号 5922 取自标题 / 带出 2 条 UI 链接」。
+
+> 隐私：这一层解析过的真实人名/域名**不得**进仓库 —— 测试夹具一律用假人名（张三/李四）与 `*.example.com`。
+
 ## 4. 需求文档标题（R4）
 
 `lib/doc-title.js`：`local:`/绝对路径 → 读文件（front-matter `title:` → 首个 `# H1` → 文件名）；

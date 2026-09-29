@@ -219,7 +219,8 @@ test('登录页场景：标题不落库，原因是可读的中文（含每一�
 
     // 工具面同样如实转述（ph_doc_title 的输出就是 resolveDocTitle 的结果）
     const tools = new Map(buildTools({ store, config: {}, version: 't' }).map((t) => [t.name, t]))
-    assert.ok(tools.get('ph_doc_title').description.includes('title'))
+    const description = tools.get('ph_doc_title').description
+    assert.ok(description.includes('谁创建的') && description.includes('产品'), `描述要说清读到了什么：${description}`)
   } finally {
     store.close()
   }
