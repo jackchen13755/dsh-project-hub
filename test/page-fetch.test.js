@@ -12,6 +12,7 @@ import { afterEach, beforeEach, test } from 'node:test'
 import {
   cookieHeaderFor,
   defaultJarPaths,
+  extractRedirectTarget,
   fetchPage,
   looksLikeLoginPage,
   parseJarCookies,
@@ -77,6 +78,56 @@ test('登录页识别：禅道风格登录页为真，普通文档页为假', ()
   assert.equal(looksLikeLoginPage('<div>请先登录后查看该文档</div>'), true)
   assert.equal(looksLikeLoginPage('<html><head><title>房态看板改造需求说明书 - 禅道</title></head><body><h1>房态看板改造</h1></body></html>'), false)
   assert.equal(looksLikeLoginPage(''), false)
+})
+
+test('登录页识别：会话失效时的「JS 跳转壳」也要认出来（禅道实测形态）', () => {
+  // 真实形态：153 字节，没有 title 也没有表单，只有一行 self.location 跳到 f=login
+  const shell = "<html><meta charset='utf-8'/><style>body{background:white}</style><script>self.location='/index.php?m=user&f=login&referer=L2luZGV4LnBocA=='; </script>"
+  assert.equal(looksLikeLoginPage(shell, { url: 'https://zen.example.com/index.php' }), true)
+  assert.equal(
+    extractRedirectTarget(shell, 'https://zen.example.com/index.php'),
+    'https://zen.example.com/index.php?m=user&f=login&referer=L2luZGV4LnBocA==',
+  )
+  assert.equal(extractRedirectTarget('<meta http-equiv="refresh" content="0;url=/login.htm">', 'https://x.example.com/a'), 'https://x.example.com/login.htm')
+  assert.equal(extractRedirectTarget('window.location.href = "/index.php?m=doc&f=view&id=3"', 'https://x.example.com/a'), 'https://x.example.com/index.php?m=doc&f=view&id=3')
+  assert.equal(extractRedirectTarget('<html><title>x</title></html>'), null)
+})
+
+test('取页链路：跟随跳转壳并在确认登录页后停下（staleJar 可判）', async () => {
+  const jar = writeJar(tmp.dir, 'zen.example.com', [['zentaosid', 'old-session']])
+  const seen = []
+  const shell = "<html><script>self.location='/index.php?m=user&f=login&referer=x';</script>"
+  const loginPage = '<html><head><title>登录 - 禅道</title></head><body><input name="account"></body></html>'
+  const fetchImpl = async (url) => {
+    seen.push(String(url))
+    if (String(url).endsWith('/status')) throw new Error('down')
+    if (String(url).includes('f=login')) return { ok: true, status: 200, text: async () => loginPage, body: null }
+    return { ok: true, status: 200, text: async () => shell, body: null }
+  }
+  const res = await fetchPage('https://zen.example.com/index.php', { fetchImpl, env: { DSH_COOKIE_JAR: jar } })
+  assert.equal(res.strategy, 'cookie-jar')
+  assert.equal(res.hops, 1, '要跟一跳才知道是不是登录页')
+  assert.equal(res.needsLogin, true)
+  assert.equal(res.staleJar, true)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /会话已过期/)
+  assert.ok(seen.some((u) => u.includes('f=login')), '应当去请求跳转目标')
+})
+
+test('取页链路：跳转壳指向正常文档时能跟到正文并读出标题', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/status')) throw new Error('down')
+    // 第一次给跳转壳，跟到带 id=9 的真实页面才给正文
+    if (String(url).includes('id=9')) {
+      return { ok: true, status: 200, text: async () => '<html><head><title>需求说明书 - 禅道</title></head><body><h1>需求说明书</h1></body></html>', body: null }
+    }
+    return { ok: true, status: 200, text: async () => "<html><script>self.location='/index.php?m=doc&f=view&id=9';</script>", body: null }
+  }
+  const res = await fetchPage('https://zen.example.com/index.php?m=doc&f=browse', { fetchImpl, env: { DSH_COOKIE_JAR: join(tmp.dir, 'none.txt') } })
+  assert.equal(res.hops, 1, '要跟一跳')
+  assert.equal(res.needsLogin, false)
+  assert.equal(res.ok, true)
+  assert.match(res.text, /需求说明书/)
 })
 
 test('取页链路：中继不可达 → 用 cookie jar（带 Cookie 头）→ 命中就返回', async () => {

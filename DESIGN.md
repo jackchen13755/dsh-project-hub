@@ -63,10 +63,14 @@
 ① 浏览器中继（`dsh-fetch-page` 守护进程 `127.0.0.1:9317` 的 `POST /forward`，扩展自动附带登录 Cookie）
 → ② cookie jar（Netscape 格式：`$DSH_COOKIE_JAR` / `~/.config/zentao/cookies.txt` /
 `~/.dsh/storages/dsh-zentao-workbench/cookies.txt`，按 host 匹配、剔除过期）
-→ ③ 裸 fetch。**拿到登录页时**（`looksLikeLoginPage`：标题以 登录/登陆/login 开头，
-或「账号+密码」表单，或「请先登录」文案）不写标题，而是返回
-`{ ok:false, source:'needs-login', needsLogin:true, strategy, error }`（error 里带上每一跳的原因），
+→ ③ 裸 fetch。**会话失效时服务端给的往往不是登录表单，而是一个跳转壳**
+（禅道实测 153 字节：`<script>self.location='/index.php?m=user&f=login&referer=…'</script>`，既无 `<title>` 也无表单），
+所以链路会**跟一跳**（最多 2 跳）后再判定。**拿到登录页时**（`looksLikeLoginPage`：标题以 登录/登陆/login 开头、
+或「账号+密码」表单、或「请先登录」文案、或跳转目标含 `f=login`）不写标题，而是返回
+`{ ok:false, source:'needs-login', needsLogin:true, staleJar, hops, strategy, error }`（error 里带上每一跳的原因与处置建议），
 避免把「登录」两个字当需求标题存进台账。
+> 实测：本机 `~/.config/zentao/cookies.txt`（2026-09-23 导出）里的会话已过期 → 服务端把请求跳到登录页，
+> 链路如实报 `staleJar:true` 并提示「重新导出 jar 或连上浏览器扩展」；`~/.local/bin/zentao-export-cookies` 重导后即可自动读回真实标题。
 > 坑：判定正则不能写 `(登录)\b` —— `\b` 只在「词字符/非词字符」交界成立，中文不是 `\w`，
 > `登录 - 禅道` 永远匹配不上（本项目实测踩过）。
 
