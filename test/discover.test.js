@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { candidatesFromPages, candidatesFromTouches, looksLikeTagOrRelease, mergeCandidates, parseSearchResults } from '../lib/discover.js'
+import { candidateOverlaps, candidatesFromPages, candidatesFromTouches, looksLikeTagOrRelease, mergeCandidates, parseSearchResults } from '../lib/discover.js'
 import { branchRequirementNo } from '../lib/git-index.js'
 import { buildTools } from '../lib/tools.js'
 import { captureApi, callApi, openStore, useTempHome } from './helpers.js'
@@ -289,4 +289,56 @@ test('续扫：上次扫到一半被打断，下次从游标接着扫（1239 页
   assert.equal(second.report.confluence.nextStart, 0, '扫到底后游标归零')
   const state = store.discoverState().find((s) => s.source === 'confluence')
   assert.equal(state.cursor, 'offset:0')
+})
+
+test('候选之间互相比：同模块算强信号；通用词（优化/逻辑）不许凑噪声', () => {
+  // 实测：不排停用词时 200 条里 191 条互相"重叠"，全是「优化」「逻辑」这种
+  const noisy = candidateOverlaps([
+    { no: 'A', title: '任务生成逻辑优化', modules: [] },
+    { no: 'B', title: '报表逻辑优化', modules: [] },
+    { no: 'C', title: '优化一下', modules: [] },
+  ])
+  assert.equal(noisy.size, 0, '只靠通用词重合 → 不许报“跟谁重”')
+  // 有区分度的词（英文/长词）才认
+  const real = candidateOverlaps([
+    { no: 'D', title: 'lostfound 查询迁移', modules: [] },
+    { no: 'E', title: 'lostfound 列表迁移', modules: [] },
+  ])
+  assert.equal(real.get('D')[0].no, 'E', 'lostfound + 迁移 两个有区分度的词 → 算信号')
+})
+
+test('候选之间互相比：同模块（强）/ 同关键词（弱），双向都给', () => {
+  const rows = [
+    { no: '5901', title: 'lostfound 查询迁移', modules: ['isomorph/views/Housekeeping', 'isomorph/models/LostAndFound'], code_commits: 5 },
+    { no: '5902', title: 'lostfound 查询优化', modules: ['isomorph/views/Housekeeping'], code_commits: 2 },
+    { no: '5903', title: '完全无关的东西', modules: ['isomorph/views/Finance'], code_commits: 1 },
+    { no: '5904', title: 'lostfound 查询迁移二期', modules: ['isomorph/models/LostAndFound'], code_commits: 1 },
+  ]
+  const map = candidateOverlaps(rows)
+  const a = map.get('5901')
+  // 排序按总重叠分：5904 与 5901 同模块 + 两个有区分度的词 → 排在 5902 前面
+  assert.equal(a[0].no, '5904')
+  assert.ok(a.some((x) => x.no === '5902'))
+  assert.ok(a[0].score >= a.find((x) => x.no === '5902').score)
+  assert.ok(!a.some((x) => x.no === '5903'), '没有交集的不要凑数')
+  const withView = a.find((x) => x.no === '5902')
+  assert.ok(withView.sharedModules.includes('isomorph/views/Housekeeping'))
+  assert.ok(withView.reasons.join('|').includes('同一代码模块'))
+  // 双向
+  assert.ok(map.get('5902').some((x) => x.no === '5901'))
+  // 字符串形态的 modules（从 DB 读出来的 JSON）也要认
+  const fromDb = candidateOverlaps([{ no: 'A', title: 'x', modules: '["m/1"]' }, { no: 'B', title: 'y', modules: '["m/1"]' }])
+  assert.equal(fromDb.get('A')[0].no, 'B')
+})
+
+test('store：候选箱带出 overlaps（全量算完再截断）', async () => {
+  const touch = store.db.prepare('INSERT OR REPLACE INTO code_touches (requirement_id, project_id, path, module, commits, first_seen, last_seen, sample, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+  touch.run('5901', 'spms', 'isomorph/views/Housekeeping/a.tsx', 'isomorph/views/Housekeeping', 5, '2026-09-01', '2026-09-20', "Merge branch 'feature/20260901-lf-5901'", Date.now())
+  touch.run('5902', 'spms', 'isomorph/views/Housekeeping/b.tsx', 'isomorph/views/Housekeeping', 3, '2026-09-02', '2026-09-21', "Merge branch 'feature/20260902-lf-5902'", Date.now())
+  await store.discoverCandidates({ git: true, today: '2026-09-29' })
+  const items = store.listDiscoverCandidates()
+  assert.equal(items.length, 2)
+  const first = items.find((x) => x.no === '5901')
+  assert.ok(first.overlaps.length >= 1, '要给候选带上"跟谁重"')
+  assert.equal(first.overlaps[0].no, '5902')
 })
