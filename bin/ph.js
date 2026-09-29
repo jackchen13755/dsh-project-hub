@@ -356,6 +356,28 @@ async function main() {
     return console.log(JSON.stringify(payload, null, 2))
   }
 
+  // ── P2：文档漂移对账 ────────────────────────────────────────────────
+  if (cmd === 'drift') {
+    if (sub === 'refresh') {
+      const snapshots = await store.refreshDocSnapshots({ id: flags.id ?? null, all: !flags.id, limit: n(flags.limit, 50) })
+      const computed = store.computeDrift({ silentDays: n(flags.days, 30) })
+      return out({ snapshots: snapshots.snapshots, rows: computed.rows }, [
+        `文档快照：${snapshots.snapshots.filter((x) => x.ok).length}/${snapshots.snapshots.length} 成功（只存版本号 + hash + 摘要）`,
+        `对账：${computed.rows.length} 条需求`,
+        ...computed.rows
+          .filter((r) => r.verdict !== 'aligned')
+          .map((r) => `  ${r.verdict === 'doc-stale' ? '⚠' : ' '} ${r.requirementId}　${r.verdict}　文档 ${r.docChangedAt ?? '-'} / 代码 ${r.codeLastAt ?? '-'} / 记录 ${r.sessionLastAt ?? '-'}`),
+      ].join('\n'))
+    }
+    if (sub === 'list' || sub === undefined) {
+      const rows = store.listDrift({ verdict: flags.verdict ?? null, limit: n(flags.limit, 200) })
+      if (rows.length === 0) return out({ items: [] }, '还没有对账结果（先跑：dsh-ph drift refresh）')
+      return out({ items: rows }, rows.map((r) => `  ${r.verdict === 'doc-stale' ? '⚠' : ' '} ${r.requirement_id}　${r.verdict}　文档 ${r.doc_changed_at ?? '-'} / 代码 ${r.code_last_at ?? '-'} / 记录 ${r.session_last_at ?? '-'}　${String(r.req_title ?? '').slice(0, 30)}`).join('\n'))
+    }
+    console.error('drift 子命令：refresh [--id X] | list [--verdict doc-stale]')
+    return 2
+  }
+
   // ── P1：需求 ↔ 代码 影响索引 ─────────────────────────────────────────
   if (cmd === 'code') {
     if (sub === 'scan') {
@@ -406,7 +428,7 @@ async function main() {
     return 2
   }
 
-  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | code | export）`)
+  console.error(`未知命令：${argv.join(' ')}\n用法见 README.md（status | scan | projects | req | log | search | report | title | code | drift | export）`)
   process.exit(2)
 }
 

@@ -284,7 +284,13 @@
 **局限（写清楚，避免误用）**：提交信息不带需求号的改动覆盖不到（因此要暴露覆盖率）；
 跨仓库（微服务）需要在多个 `projects.root` 上都跑；重构/重命名的历史轨迹会断。
 
-### 9.3 方案 B｜三方对账 / 文档漂移（治「变更没回写文档」）
+### 9.3 方案 B｜三方对账 / 文档漂移（治「变更没回写文档」）—— ✅ **P2 已实现（schema v9）**
+
+> 实现状态（2026-09-29）：`lib/drift.js`（判定纯函数）+ `lib/doc-snapshot.js`（快照）+ `doc_snapshots`/`requirement_drift` 两张表 +
+> `POST /drift/refresh`、`GET /drift` + 面板第 4 个 tab「**变更对账**」+ 工具 `ph_drift` + CLI `dsh-ph drift refresh|list`。
+> 与设计的差异：**判定优先级写死了「silent 压过 doc-stale」** —— 三条线里最新的动静都超过 `silentDays`（默认 30 天）时，
+> 结论是「很久没动静」而不再催「文档没跟上」（都没人动了，催文档是噪声）。
+> 快照**只存** `version / hash(正文 djb2) / excerpt(前 400 字) / changed_at / fetched_at`，**没有正文字段**（有测试断言 `PRAGMA table_info(doc_snapshots)` 里不含 `text`）。
 
 三条时间线对齐到同一张表 `requirement_drift(requirement_id, doc_version, doc_changed_at,
 code_last_at, session_last_at, verdict, evidence)`：
@@ -343,7 +349,7 @@ excerpt, fetched_at)`，每次读文档存一版 `hash + 前 N 字`；这样"文
 | --- | --- | --- | --- |
 | P0 ✅ | **同 Figma 稿冲突提示**（§9.4 先手，已实现：`lib/link-index.js` + 卡片/详情/工具提示） | 无 | 半天 |
 | P1 ✅ | 方案 A：`code_touches` 索引 + 覆盖率 + 需求显示代码落点（**已实现**） | 无 | 1–2 天 |
-| P2 | 方案 B：`doc_snapshots` + `requirement_drift` 看板（新 tab 或需求 tab 顶部条） | A 的数据 | 1–2 天 |
+| P2 ✅ | 方案 B：`doc_snapshots` + `requirement_drift` 看板（第 4 个 tab「变更对账」，**已实现**） | A 的数据 | 1–2 天 |
 | P3 | 方案 C：评审影响报告（HTTP + 面板按钮 + 提示词） | A、B | 1–2 天 |
 | P4 | 方案 D：漂移待办（默认关闭） | B | 半天 |
 
