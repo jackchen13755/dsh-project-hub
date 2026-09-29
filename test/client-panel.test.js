@@ -326,3 +326,19 @@ test('删除按钮：两段确认的文案状态机（只在归档视图出现�
   assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'requirement', 7), '删除', '类型不同也不误触发')
   assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'log', 7), '确认删除？')
 })
+
+test('候选箱不再被截断（原先 slice(0,8) 只剩 8 条 —— 用户实测反馈"展示不全"）', () => {
+  const { def } = loadClient()
+  const src = String(def.factory.toString())
+  const markup = String(def.factory(() => fakeReact()).__test.renderPanel ?? '')
+  const body = `${src}${markup}`
+  assert.ok(!/discover\.items\.slice\(0, 8\)/.test(body), '不许再只渲染前 8 条')
+  assert.ok(/只看有重复信号/.test(body), '要有"只看有重复信号"的筛选')
+})
+
+test('需求表单在两个 tab 都能看到（在历史需求 tab 点新建也要能填写）', () => {
+  const { def } = loadClient()
+  const body = String(def.factory.toString())
+  assert.ok(/view === 'req' \|\| view === 'history'/.test(body), '表单渲染条件要含历史需求 tab')
+  assert.ok(/const openReqForm = /.test(body), '打开表单时要切到需求台账 tab（双保险）')
+})
