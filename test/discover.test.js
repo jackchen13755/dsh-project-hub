@@ -342,3 +342,31 @@ test('store：候选箱带出 overlaps（全量算完再截断）', async () => 
   assert.ok(first.overlaps.length >= 1, '要给候选带上"跟谁重"')
   assert.equal(first.overlaps[0].no, '5902')
 })
+
+test('定时增量发现的开关存 meta（0=关闭；开启后即时可读，不用改配置/重启）', async () => {
+  const settings = store.discoverSettings()
+  assert.equal(settings.intervalMinutes, 0, '默认关闭')
+  const saved = store.saveDiscoverSettings({ intervalMinutes: 1440 })
+  assert.equal(saved.intervalMinutes, 1440)
+  assert.equal(store.discoverSettings().intervalMinutes, 1440, '心跳每轮读它 → 一开即生效')
+  store.saveDiscoverSettings({ intervalMinutes: 0 })
+  assert.equal(store.discoverSettings().intervalMinutes, 0)
+})
+
+test('增量扫描不许清候选（它只看最近几天 —— 实测把上一轮的 151 条历史候选全清了）', async () => {
+  await store.saveRequirement({ id: 'HS-1', project: 'hs_config', title: '既定', readTitle: false, docUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=1' })
+  const page = (no) => ({ title: `【${no}】需求 ${no}`, content: { id: String(no) }, lastModified: '2026-09-20T10:00:00.000+08:00' })
+  const fetchBoth = async () => ({ ok: true, text: JSON.stringify({ totalSize: 2, _links: { base: 'https://wiki.example.com' }, results: [page(5901), page(5902)] }) })
+  await store.discoverCandidates({ rootPageId: '1', git: false, fetchText: fetchBoth, today: '2026-09-29' })
+  assert.equal(store.listDiscoverCandidates().length, 2)
+
+  // 增量（sinceDay）：文档树只回了 5902（5901 不在窗口内）→ 5901 绝不能被清掉
+  const fetchOnlyRecent = async () => ({ ok: true, text: JSON.stringify({ totalSize: 1, _links: { base: 'https://wiki.example.com' }, results: [page(5902)] }) })
+  const inc = await store.discoverCandidates({ rootPageId: '1', git: false, sinceDay: '2026-09-26', fetchText: fetchOnlyRecent, today: '2026-09-29' })
+  assert.equal(inc.dropped, 0, '增量不清理')
+  assert.equal(store.listDiscoverCandidates().length, 2, '上一轮的候选要留着')
+
+  // 全量重扫（无 sinceDay 且扫到底）→ 这时才可以按"没扫到"清理
+  const full = await store.discoverCandidates({ rootPageId: '1', git: false, fetchText: fetchOnlyRecent, today: '2026-09-29' })
+  assert.equal(full.dropped, 1, '全量扫描才清理')
+})
