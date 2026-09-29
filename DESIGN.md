@@ -53,6 +53,19 @@
   limit，排在后面的会话会永远轮不到。
 - 产出：`activity` 明细 + `work_logs`（`source='session-scan'`，标题形如「开发 SPMS-5921」）。
 
+## 3.5 标签（`requirements.tags`）
+
+一列逗号拼接的文本（`parseTags` 支持数组或中英文逗号字符串）。三处用法与两个口径：
+
+| 用途 | 实现 |
+| --- | --- |
+| 聚合给 UI | `store.listTags({archived,project})` → `[{tag,count}]`，按条数降序、同数按**码位**排序（不用 `localeCompare('zh')`：排序随 ICU 版本飘，下拉顺序会变） |
+| 筛选 | `listRequirements({tag})` / `search({tag})`，SQL 用 `(',' || REPLACE(tags,' ','') || ',') LIKE '%,tag,%'` 做**整词**匹配 —— 否则「评审」会把「待评审」也捞进来 |
+| 输入补全 | 客户端 `parseTagInput` / `addTagToText` / `tagSuggestions`（排除已选、排除像 URL 的条目、按次数降序、最多 12 个） |
+
+> 实测坑：有人在「标签」框里贴了 Figma 设计稿链接（应填在「UI 设计」链接里）。所以
+> `tagSuggestions` 会把含 `://`、超过 32 字的条目挡在建议之外，避免这种脏数据扩散成"标签"。
+
 ## 4. 需求文档标题（R4）
 
 `lib/doc-title.js`：`local:`/绝对路径 → 读文件（front-matter `title:` → 首个 `# H1` → 文件名）；
@@ -104,6 +117,7 @@
 | POST | `/scan` | `{ since?,dryRun?,limit? }`（只做增量；传 `full`/`rebuild` 会在响应里回 `ignored` + `note`） | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails, ignored? }` |
 | GET | `/report` | `from?,to?,project?` | `{ ok, days:[{date,projects:[{projectId,projectName,logCount,requirements:[{id,title,msgs,toolCalls,lastTime}]}]}], totals }` |
 | POST | `/doc-title` | `{ url?,path? }` | `{ ok, title, source }` |
+| GET | `/requirements/tags` | `archived?,project?` | `{ ok, tags:[{tag,count}] }`（按条数降序，同数按码位；面板下拉与表单补全共用） |
 | GET | `/brief` | `id?,project?,task?,logs?` | `{ ok, brief, project:{id,name,root}, requirement:{id,title,status,links} }` |
 | POST | `/open-session` | `{ id, task?, logs? }` | `{ ok, prompt, project, workspace:{id,path,title,created}\|null, workspaceError, canCreate, requirement }` |
 
@@ -121,7 +135,8 @@
 内联渲染约束：根节点 `flex:1 1 auto` 撑满座位、滚动区 `min-height:0`，不渲染悬浮层/固定抽屉。
 
 **内容（三个 tab 严格分开，不混在一起）**：
-- **需求台账**：筛选（搜索 / 项目 / 只看已归档）+ 需求卡片（链接按类分组，**类别胶囊与每条链接都可点**；
+- **需求台账**：筛选（搜索 / 项目 / **标签** / 只看已归档；标签选项来自 `/requirements/tags`，带条数，
+  卡片与详情里的 `#标签` 点一下即按它筛，当前筛选以一颗可清除的胶囊显示）+ 需求卡片（链接按类分组，**类别胶囊与每条链接都可点**；
   **项目胶囊按项目稳定配色** —— 对项目 id 做哈希取 12 色中间调色板，同一项目永远同色）+
   「＋ 需求」新建 与「编辑」载入表单（`replaceLinks` 整份保存链接）；
 - **归档视图**（`只看已归档` 打开时）：顶部黄色提示条 + 每项多一个「删除」按钮。
