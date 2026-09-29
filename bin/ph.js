@@ -230,6 +230,27 @@ async function main() {
       })
       return out(log, `已记录 #${log.id}：${log.date} [${log.kind}] ${log.title}（${log.projectName ?? log.projectId}${log.requirementId ? ` / ${log.requirementId}` : ''}）`)
     }
+    // 编辑：`log update --id 1320 --title 新标题 --kind review ...`（只改传了的字段）
+    if (sub === 'update' || sub === 'edit') {
+      if (flags.id === undefined) {
+        console.error('update 需要 --id')
+        process.exit(2)
+      }
+      const updated = store.updateLog(Number(flags.id), {
+        date: typeof flags.date === 'string' ? flags.date : undefined,
+        project: typeof flags.project === 'string' ? flags.project : undefined,
+        requirement: typeof flags.requirement === 'string' ? flags.requirement : undefined,
+        kind: typeof flags.kind === 'string' ? flags.kind : undefined,
+        title: typeof flags.title === 'string' ? flags.title : undefined,
+        detail: typeof flags.detail === 'string' ? flags.detail : undefined,
+        minutes: flags.minutes !== undefined ? Number(flags.minutes) : undefined,
+      })
+      if (!updated) {
+        console.error(`没找到记录 #${flags.id}`)
+        process.exit(2)
+      }
+      return out(updated, `已更新 #${updated.id}：${updated.date} [${updated.kind}] ${updated.title}（${updated.projectName ?? updated.projectId}${updated.requirementId ? ` / ${updated.requirementId}` : ''}）`)
+    }
     if (sub === 'list' || sub === undefined) {
       const res = store.listLogs({
         project: flags.project,

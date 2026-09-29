@@ -17,20 +17,43 @@ import vm from 'node:vm'
 const here = dirname(fileURLToPath(import.meta.url))
 const CLIENT = join(here, '..', 'lib', 'client.js')
 
-/** 假 React：只要够跑通面板的结构（createElement + 四个 hook）。 */
+/** 假 React：只要够跑通面板的结构（createElement + 四个 hook）。
+ *  ⚠️ children 必须像真 React 一样放进 `props.children`：组件（Btn/Pill/Field…）内部
+ *  读的就是 `props.children`，桩里不放就会「按钮渲染不出文字」这类假阴性。 */
 function fakeReact() {
   const calls = []
   return {
     calls,
     createElement: (type, props, ...children) => {
-      calls.push({ type, props, children })
-      return { type, props: props ?? {}, children }
+      const merged = { ...(props ?? {}) }
+      if (children.length === 1) merged.children = children[0]
+      else if (children.length > 1) merged.children = children
+      calls.push({ type, props: merged, children })
+      return { type, props: merged, children: merged.children }
     },
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
     useEffect: () => {},
     useCallback: (fn) => fn,
     useRef: (value) => ({ current: value }),
   }
+}
+
+/** 递归展开函数组件，收集真正的宿主元素（用来断言 <a>/<button> 这类）。 */
+function collectElements(node, out = [], depth = 0) {
+  if (node === null || node === undefined || depth > 20) return out
+  if (Array.isArray(node)) {
+    for (const item of node) collectElements(item, out, depth + 1)
+    return out
+  }
+  if (typeof node === 'object') {
+    if (typeof node.type === 'function') {
+      collectElements(node.type(node.props ?? {}), out, depth + 1)
+      return out
+    }
+    out.push(node)
+    if (node.children) collectElements(node.children, out, depth + 1)
+  }
+  return out
 }
 
 /** 递归收集渲染树里的所有字符串；函数组件要真的调用一次才会展开（假 React 不做这件事）。 */
@@ -151,13 +174,16 @@ test('侧边栏全链注册：页签类型 + 主体座位 + 标题座位 + 打�
   assert.equal(typeof body.render, 'function')
   assert.equal(typeof title.render, 'function')
 
-  // ③ 渲染路径（假 React 下不能抛）：页面头、状态行、两个页签按钮都要出现
+  // ③ 渲染路径（假 React 下不能抛）：页面头、三个 tab、工具栏都要出现，且 tab 内容互不混
   const tree = body.render({ sessionId: 'session-test' })
   assert.ok(tree, 'render 必须返回元素')
   const texts = collectStrings(tree).join('|')
-  for (const expected of ['项目管理', '刷新', '扫描会话', '需求台账', '开发日志', '＋ 需求', '＋ 记录']) {
+  for (const expected of ['项目管理', '刷新', '需求台账', '开发日志', '会话扫描', '＋ 需求', '只看已归档']) {
     assert.ok(texts.includes(expected), `面板文案缺少「${expected}」（实际渲染到：${texts.slice(0, 300)}）`)
   }
+  assert.deepEqual([...mod.__test.TABS.map(([k]) => k)], ['req', 'logs', 'scan'], '三个 tab：需求 / 日志 / 扫描，分开不混')
+  assert.ok(!texts.includes('＋ 记录'), '默认在需求 tab，不该出现日志 tab 的「＋ 记录」按钮')
+  assert.ok(!texts.includes('按天活动'), '需求 tab 不该出现会话扫描的按天活动')
   const titleEl = title.render()
   assert.ok(titleEl)
 
@@ -209,18 +235,25 @@ test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条�
   ]
   const chips = renderLinkChips(links, null)
   const texts = collectStrings(chips).join('|')
-  assert.ok(texts.includes('需求文档(2)'), `类别要显示条数：${texts}`)
-  assert.ok(texts.includes('UI 设计(2)'))
+  assert.ok(texts.includes('需求文档 2'), `类别要显示条数：${texts}`)
+  assert.ok(texts.includes('UI 设计 2'))
   assert.ok(texts.includes('需求说明书') && texts.includes('需求补充'))
   assert.ok(texts.includes('移动端稿'))
-  const hrefs = chips.filter((c) => c && c.type === 'a').map((c) => c.props.href)
-  assert.equal(hrefs.length, 5, '每条链接都要可点开')
+  // 链接都要可点：5 条链接 + 3 个可点类别胶囊（doc / ui / wbs）
+  const hrefs = collectElements(chips)
+    .filter((el) => el.type === 'a')
+    .map((el) => el.props.href)
+  assert.equal(hrefs.length, 8, '每条链接与每个类别胶囊都要可点')
+  assert.ok(hrefs.includes('https://figma.example/x'), '类别胶囊点开该类的第一条')
+  assert.ok(hrefs.every((href) => typeof href === 'string' && href.startsWith('http')), '不允许出现 href 为空的假链接')
 
   // 老数据回落：links 为空时用单值列渲染
   const legacy = renderLinkChips([], { docUrl: 'https://doc.example/old', docTitle: '老文档', uiUrl: 'https://figma.example/old' })
-  const legacyHrefs = legacy.filter((c) => c && c.type === 'a').map((c) => c.props.href)
+  const legacyHrefs = collectElements(legacy)
+    .filter((el) => el.type === 'a')
+    .map((el) => el.props.href)
   // 跨 vm realm 的数组不能直接 deepEqual，按值比
-  assert.equal(legacyHrefs.join('|'), 'https://doc.example/old|https://figma.example/old')
+  assert.equal(legacyHrefs.join('|'), 'https://doc.example/old|https://doc.example/old|https://figma.example/old|https://figma.example/old')
 
   // 面板级：需求表单里四类都有「＋ 添加一条」
   const calls = []

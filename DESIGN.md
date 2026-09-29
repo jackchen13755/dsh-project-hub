@@ -83,6 +83,7 @@
 | POST | `/requirements/delete` | `{ id }` | `{ ok, deleted }` |
 | GET | `/logs` | `project?,requirement?,from?,to?,kind?,q?,limit?,offset?` | `{ ok, total, items:[{id,date,projectId,requirementId,kind,title,detail,minutes,source,sessionId,evidence}] }` |
 | POST | `/logs/add` | `{ date?,project,requirement?,kind?,title,detail?,minutes? }` | `{ ok, log }` |
+| POST | `/logs/update` | `{ id, date?,project?,requirement?,kind?,title?,detail?,minutes? }`（只改传了的字段；扫描派生的记录也能改，且不被重扫覆盖） | `{ ok, log }` |
 | POST | `/logs/delete` | `{ id }` | `{ ok }` |
 | GET | `/search` | `q?,project?,requirement?,from?,to?,kind?,limit?` | `{ ok, requirements:[...], logs:[...], days:[{date,projects:[{projectId,projectName,requirements:[{id,title,msgs,lastTime}]}]}] }` |
 | POST | `/scan` | `{ since?,dryRun?,limit? }`（只做增量；传 `full`/`rebuild` 会在响应里回 `ignored` + `note`） | `{ ok, sessions, changed, skipped, activities, logs, days, errors, errorDetails, ignored? }` |
@@ -102,7 +103,14 @@
 `sidebarRight.openTab(KIND)` 打开；**入口按钮**走 `sidebar.footer.action`（侧边栏底部「📋 项目管理」）。
 内联渲染约束：根节点 `flex:1 1 auto` 撑满座位、滚动区 `min-height:0`，不渲染悬浮层/固定抽屉。
 
-**内容**：工具栏（搜索 + 项目下拉 + 日期区间 + 类型 + 只看已归档 + 扫描 + 状态行）→ 需求台账卡片
-（链接按类展示，每类带条数）/ 开发日志列表 → 两个折叠表单。需求表单里 **UI 设计 / 需求文档 / WBS /
-后端设计** 四类各有「＋ 添加一条」，每条可填 URL / 标题 / 备注、可单条删除，「读标题」按条读回；
-详情里还能直接加链接、逐条删除。数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
+**内容（三个 tab 严格分开，不混在一起）**：
+- **需求台账**：筛选（搜索 / 项目 / 只看已归档）+ 需求卡片（链接按类分组，**类别胶囊与每条链接都可点**）+
+  「＋ 需求」新建 与「编辑」载入表单（`replaceLinks` 整份保存链接）；
+- **开发日志**：筛选（搜索 / 项目 / 日期区间 / 类型）+ 记录列表（「编辑」→ `POST /logs/update`）+
+  「＋ 记录」新增；
+- **会话扫描**：扫描状态卡（上次扫描 / 周期 / 错误 / 会话文件·变更·跳过·活动·记录·天数）+
+  「立即增量扫描」「预览（dryRun）」+ 按天活动报表（可跳到日志 tab 按那天过滤）。
+
+需求表单里 **UI 设计 / 需求文档 / WBS / 后端设计** 四类各有「＋ 添加一条」，每条可填 URL / 标题 / 备注、
+可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
+数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。

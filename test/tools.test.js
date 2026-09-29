@@ -87,7 +87,9 @@ test('tools: buildTools 返回 11 个工具，结构契约齐全', () => {
 
   // 必填参数
   assert.deepEqual(byName.get('ph_get_requirement').parameters.required, ['id'])
-  assert.deepEqual(byName.get('ph_log_work').parameters.required, ['title'])
+  // ph_log_work 现在是「新增或编辑」：传 id 即编辑，title 不再强制必填
+  assert.deepEqual(byName.get('ph_log_work').parameters.required, [])
+  assert.ok(byName.get('ph_log_work').parameters.properties.id, '应支持按 id 编辑记录')
   assert.deepEqual(byName.get('ph_archive').parameters.required, ['target', 'id'])
   assert.deepEqual(byName.get('ph_doc_title').parameters.required, ['url'])
   assert.deepEqual(byName.get('ph_save_requirement').parameters.required, [], '项目/id 都能从会话 cwd 推')
