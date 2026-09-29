@@ -428,16 +428,16 @@ test('store: scanSessions 增量幂等 —— 第二次 changed=0，清水位重
   assert.equal(newLog[0].sessionId, 'sess-store-1')
 })
 
-test('store: scanSessions dryRun 只报告不写库（activities/logs 恒为 0）', async () => {
+test('store: scanSessions dryRun 只报告不写库（但会报「将写入多少」）', async () => {
   const s = seedSession(tmp)
   const dry = await store.scanSessions({ dryRun: true })
   assert.equal(dry.changed, 1)
   assert.deepEqual(dry.days, ['2026-03-01', '2026-03-02', '2026-03-03'], 'dryRun 也报会覆盖哪些天')
   assert.equal(dry.sessions.length, 1)
   assert.deepEqual(dry.sessions[0].days, ['2026-03-01(2需求)', '2026-03-02(1需求)', '2026-03-03(0需求)'])
-  // 实际行为：dryRun 下 activities/logs 恒为 0（计数发生在写库分支里）
-  assert.equal(dry.activities, 0)
-  assert.equal(dry.logs, 0)
+  // dryRun 报的是「将会写入多少」：3 天会话级活动 + 3 条需求级活动；记录 = 3 条需求级 + 1 条项目级
+  assert.equal(dry.activities, 6, 'dryRun 也要给出将会写入的活动条数（否则预览恒为 0）')
+  assert.equal(dry.logs, 4, 'dryRun 报将会新增的记录条数')
   assert.equal(store.counts().workLogs, 0)
   assert.equal(store.counts().activity, 0)
   assert.equal(store.counts().scannedSessions, 0, 'dryRun 不写水位')
@@ -557,8 +557,8 @@ test('store: search 按需求 / 项目 / 日期 / 关键词过滤', async () => 
   const all = store.search({})
   assert.equal(all.requirementTotal, 1)
   assert.equal(all.logTotal, 5)
-  // search 的 days 只来自 activity（扫描活动）；手工记录那天要 report 才有（见 report 测试）
-  assert.deepEqual(all.days.map((d) => d.date), ['2026-03-03', '2026-03-02', '2026-03-01'])
+  // search 的 days 与 report 同口径：扫描活动 + 手工记录都会出现（避免两个视图对不上）
+  assert.deepEqual(all.days.map((d) => d.date), ['2026-03-05', '2026-03-03', '2026-03-02', '2026-03-01'])
 
   const byKeyword = store.search({ q: '分页' })
   assert.equal(byKeyword.requirementTotal, 1, '需求标题命中')
@@ -576,7 +576,8 @@ test('store: search 按需求 / 项目 / 日期 / 关键词过滤', async () => 
 
   const byDate = store.search({ from: '2026-03-05', to: '2026-03-05' })
   assert.equal(byDate.logTotal, 1)
-  assert.deepEqual(byDate.days, [], '那一天只有手工记录、没有扫描活动')
+  assert.deepEqual(byDate.days.map((d) => d.date), ['2026-03-05'], '只有手工记录的那天也要出现在 days 里（与 report 同口径）')
+  assert.equal(byDate.days[0].projects[0].projectName, 'spms', '项目名要回查 projects 表')
   assert.equal(byDate.requirementTotal, 1, '需求侧不吃 from/to 过滤（实际行为）')
 
   const byKind = store.search({ kind: 'bug' })
@@ -618,7 +619,7 @@ test('store: report 的 天-项目-需求 聚合（扫描活动 + 手工记录�
   const day5 = report.days.find((d) => d.date === '2026-03-05')
   assert.equal(day5.logCount, 1)
   assert.equal(day5.msgs, 0)
-  assert.equal(day5.projects[0].projectName, null, '只有手工记录的那天拿不到项目名（实际行为）')
+  assert.equal(day5.projects[0].projectName, 'spms', '只有手工记录的那天也要回查 projects 表补项目名')
   assert.deepEqual(day5.projects[0].requirements, [])
   assert.deepEqual(day5.projects[0].kinds, { review: 1 })
 

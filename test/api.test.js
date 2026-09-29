@@ -342,7 +342,7 @@ test('api: 未知路由 404 / 方法不匹配 404 / 坏 JSON 500', async () => {
   assert.match(wrongMethod.json.error, /未知路由 POST \/status/)
 
   const badJson = await callApi(api.handler, { method: 'POST', url: u('/logs/add'), rawBody: '{不是 JSON' })
-  assert.equal(badJson.statusCode, 500)
+  assert.equal(badJson.statusCode, 400, '客户端传坏 body 是 4xx，不该报 500')
   assert.equal(badJson.json.ok, false)
   assert.match(badJson.json.error, /请求体不是合法 JSON/)
 })

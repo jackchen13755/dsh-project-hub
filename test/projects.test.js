@@ -73,10 +73,10 @@ test('paths: slugify / deriveRequirementId', () => {
   assert.equal(slugify('SPMS_5921'), 'spms-5921')
   assert.equal(slugify('---'), '')
   assert.equal(slugify(null), '')
-  // 实际行为：slugify 只保留 [a-z0-9]，非 ASCII 一律折成 '-'（纯中文 → 空串）。
-  // 这条是「特性记录」，不是期望语义 —— 详见报告里的实现发现 F3。
-  assert.equal(slugify('多层/中文 目录'), '')
-  assert.equal(slugify('工作/spms'), 'spms')
+  // 中文必须保留（Unicode slug）：ASCII 白名单会让 '/w/工作/spms' 与 '/w/spms' 撞同一个 id，
+  // 纯中文目录还会塌成空串 → 'unknown'，多个项目在 projects.id 主键上互相覆盖。
+  assert.equal(slugify('多层/中文 目录'), '多层-中文-目录')
+  assert.equal(slugify('工作/spms'), '工作-spms')
 
   assert.equal(deriveRequirementId('spms', '5921'), 'SPMS-5921')
   assert.equal(deriveRequirementId('spms-ui', '5921'), 'SPMS-UI-5921')
@@ -112,8 +112,13 @@ test('paths: projectIdFromCwd —— <root>/spms 与 <root>/spms-ui/spms 是两�
   // cwd 恰好等于根 → relative 为空 → 也退化成目录名
   assert.equal(projectIdFromCwd(workRoot, [workRoot]), basename(workRoot).toLowerCase())
   assert.equal(projectIdFromCwd('/'), 'unknown')
-  // 实际行为：中文目录名 slug 成空串 → id 退化成 'unknown'（见报告 F3）
-  assert.equal(projectIdFromCwd(join(workRoot, '中文项目'), [workRoot]), 'unknown')
+  // 中文目录名保留（Unicode slug），不再塌成 'unknown'
+  assert.equal(projectIdFromCwd(join(workRoot, '中文项目'), [workRoot]), '中文项目')
+  assert.notEqual(
+    projectIdFromCwd(join(workRoot, '工作', 'spms'), [workRoot]),
+    projectIdFromCwd(join(workRoot, 'spms'), [workRoot]),
+    '中文子目录不能与同名顶层目录撞 id',
+  )
 
   const sortedRoots = defaultWorkRoots({ DSH_PROJECT_ROOTS: `${join(scratch, 'a')}:${join(scratch, 'a', 'b')}` })
   assert.deepEqual(sortedRoots, [join(scratch, 'a', 'b'), join(scratch, 'a')], '工作根必须按长度倒序')
