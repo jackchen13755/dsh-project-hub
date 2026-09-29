@@ -315,6 +315,75 @@ test('项目配色：同一项目恒定同色，不同项目基本不同色（�
   assert.ok(colors.size >= 4, `8 个项目至少 4 种颜色，实际 ${colors.size}`)
 })
 
+test('面板底色：四处内联不透明底色（样式表被 CSP 拦掉也照样不透明）', () => {
+  const { def, appended } = loadClient()
+  const mod = def.factory(() => fakeReact())
+
+  const slotRegistrations = []
+  const ctx = {
+    inject: (deps, cb) => {
+      if (deps.includes('sidebarRightTabs')) cb({ sidebarRightTabs: { register: () => () => {} } })
+      if (deps.includes('sidebarRight')) cb({ sidebarRight: { openTab: () => {} } })
+      return () => {}
+    },
+    slots: {
+      inject: (name, cb) => {
+        cb()
+        return () => {}
+      },
+      register: (payload, render) => {
+        slotRegistrations.push({ payload, render })
+        return () => {}
+      },
+    },
+    effect: (fn) => {
+      const dispose = fn()
+      return () => {
+        if (typeof dispose === 'function') dispose()
+      }
+    },
+  }
+  mod.apply(ctx)
+
+  // ① 底色必须内联：桌面外壳可能拦掉注入的 <style>（CSP 只放行 style-src-attr），
+  //    写在表里的底色会静默失效 —— 那正是「面板还是透明」的成因。
+  const css = appended.map((el) => el.textContent).join('\n')
+  assert.ok(!/dsh-ph-surface/.test(css), '底色不该再放样式表')
+  assert.ok(!/bg-layer-1/.test(css), '样式表里不该出现面板底色令牌（表不生效时会丢）')
+  assert.ok(/dsh-ph-tab:hover/.test(css), '页签 hover 这类点缀留在表里')
+
+  // ② 面板本体 + 头部 + 页签条 + 吸顶工具栏四处：同一份内联底色，且**不透明**
+  const body = slotRegistrations.find((r) => r.payload.name === 'sidebar.right.pane.tab')
+  const tree = body.render({ sessionId: 'session-preview' })
+  const surfaces = collectElements(tree).filter((el) => el.props && el.props.style && 'backgroundColor' in el.props.style)
+  assert.equal(surfaces.length, 4, `面板本体 + 头部 + 页签条 + 工具栏都该有底色，实际 ${surfaces.length} 处`)
+  for (const el of surfaces) {
+    const { backgroundColor, backgroundImage } = el.props.style
+    assert.match(backgroundColor, /^var\(--dsw-alias-bg-layer-1/, '底色要用宿主的 bg-layer-1（不透明面板色）')
+    assert.ok(!/transparent|rgba\(/.test(backgroundColor), `面板底色不许带透明度：${backgroundColor}`)
+    assert.match(backgroundImage, /^linear-gradient\(color-mix\(in srgb, var\(--dsw-alias-brand-primary/, '淡染层 = 主题色纯色渐变')
+    assert.ok(!/transparent\)/.test(backgroundImage.replace(/, transparent\)/g, '')), '淡染层只能是同一个颜色叠两次')
+  }
+  const same = new Set(surfaces.map((el) => JSON.stringify([el.props.style.backgroundColor, el.props.style.backgroundImage])))
+  assert.equal(same.size, 1, '四处必须是同一份底色（否则吸顶工具栏会和内容区对不上）')
+  assert.ok(
+    surfaces.some((el) => el.props.style.flexDirection === 'column' && el.props.style.height === '100%'),
+    '撑满座位的面板根节点也要有底色',
+  )
+
+  // ③ 页签形状/颜色也内联（不在表里）：5 个页签、当前页签高亮走 accent
+  const tabs = collectElements(tree).filter((el) => el.props && el.props.className === 'dsh-ph-tab')
+  assert.equal(tabs.length, 5, `五个页签都要有内联样式，实际 ${tabs.length}`)
+  for (const tab of tabs) {
+    assert.ok(tab.props.style && tab.props.style.borderBottom, '页签下边框（选中态那条 accent 线）必须内联')
+    assert.ok(!('opacity' in tab.props.style), '页签不许用 opacity 调淡（半透明文字 = 看不清）')
+  }
+  assert.ok(
+    tabs.some((el) => String(el.props.style.borderBottom).includes('state-business-primary')),
+    '选中的页签要用 accent 下划线',
+  )
+})
+
 test('删除按钮：两段确认的文案状态机（只在归档视图出现）', () => {
   const { def } = loadClient()
   const mod = def.factory(() => fakeReact())
