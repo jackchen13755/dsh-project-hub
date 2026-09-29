@@ -154,7 +154,7 @@ test('renderReviewReport：五节齐全 + 明写边界；无关联时也说清�
   await seed()
   const report = store.buildReviewReport('SPMS-5922', { now: '2026-09-29 20:00' })
   assert.equal(report.ok, true)
-  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 复用检查（能不能不做）', '## 6. 前端交互检查', '## 7. 证据与边界']) {
+  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 遗漏检查（改一处，还有哪些地方要跟着改）', '## 6. 复用检查（能不能不做）', '## 7. 前端交互检查', '## 8. 证据与边界']) {
     assert.ok(report.markdown.includes(section), `报告缺小节：${section}`)
   }
   assert.match(report.markdown, /SPMS-6001/)
@@ -223,10 +223,10 @@ test('API：POST /review-report 与 GET /review-report', async () => {
   const api = captureApi(store, { version: 't' })
   const post = await callApi(api.handler, { method: 'POST', url: '/project-hub/api/review-report', body: { id: 'SPMS-5922' } })
   assert.equal(post.statusCode, 200)
-  assert.match(post.json.markdown, /## 7. 证据与边界/)
+  assert.match(post.json.markdown, /## 8. 证据与边界/)
   const get = await callApi(api.handler, { method: 'GET', url: '/project-hub/api/review-report?id=SPMS-5922' })
   assert.equal(get.statusCode, 200)
-  assert.match(get.json.markdown, /## 7. 证据与边界/)
+  assert.match(get.json.markdown, /## 8. 证据与边界/)
   assert.ok(get.json.related.length >= 2)
   const bad = await callApi(api.handler, { method: 'GET', url: '/project-hub/api/review-report' })
   assert.equal(bad.statusCode, 400)
