@@ -145,3 +145,18 @@ test('客户端镜像实现 extractNoFromTitle 与宿主 lib/req-no.js 同结果
   assert.equal(fmtClock(Date.parse('2026-09-29T14:03:05')), '14:03:05')
   assert.equal(fmtClock(null), '')
 })
+
+test('章节页编号不许被当成需求号（文档树回归：01-Service360需求文档 / 11 Housekeeping / 32 CEPT）', () => {
+  // 实测踩到：这些章节页标题里的"首位数字"曾被认成需求号 11 / 32，会把章节编号写进台账
+  assert.equal(extractRequirementNo('01-Service360需求文档'), null)
+  assert.equal(extractRequirementNo('11  Housekeeping'), null)
+  assert.equal(extractRequirementNo('32 CEPT'), null)
+  assert.equal(extractRequirementNo('11 Housekeeping 改造'), null)
+  // 带标记的短号仍然认（明确写了标记就不猜）
+  assert.equal(extractRequirementNo('#582 小改动'), '582')
+  assert.equal(extractRequirementNo('【12】某某'), '12')
+  // 4–6 位裸号照旧认
+  assert.equal(extractRequirementNo('5921 房态看板改造'), '5921')
+  assert.equal(extractRequirementNo('5921-房态看板改造'), '5921')
+  assert.equal(extractRequirementNo('55716 支付方式'), '55716')
+})

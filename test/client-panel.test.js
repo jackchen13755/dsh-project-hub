@@ -98,6 +98,18 @@ function loadClient() {  const code = readFileSync(CLIENT, 'utf8')
   return { def: captured, appended }
 }
 
+test('客户端号识别镜像：章节页编号不许被当成需求号（与宿主同结果）', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const fn = mod.__test.extractNoFromTitle
+  assert.equal(fn('【5922】L&F Q3 Enhancements'), '5922')
+  assert.equal(fn('SPMS-5921 房态看板'), '5921')
+  assert.equal(fn('11  Housekeeping'), null)
+  assert.equal(fn('01-Service360需求文档'), null)
+  assert.equal(fn('32 CEPT'), null)
+  assert.equal(fn('5921 房态看板改造'), '5921')
+})
+
 test('客户端信封：id 与 factory 形态符合宿主约定', () => {
   const { def } = loadClient()
   assert.ok(def, 'window.__ModuleLoader__.load 没有被调用')
