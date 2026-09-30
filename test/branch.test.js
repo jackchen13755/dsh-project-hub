@@ -1,15 +1,18 @@
 /**
- * 「开新会话」拆成两个：一个**带「从 master 拉新分支并切换」的提示词**，一个与原来完全一样。
+ * 「开新会话」的拉分支有两种基线（用户 2026-09-30 要求）：
+ *   ① 从 **master** 拉 —— 原来的唯一行为，一个字没变（`branch:true` 仍等价）；
+ *   ② 从 **当前分支** 拉 —— 基线是当前 HEAD，不 fetch、不切 master，但要先清工作区。
  * 分支格式（用户给定）：`feature/YYYYMMDD-需求名称英文-需求号`。
  *
- * 三个必须钉住的点：
+ * 四个必须钉住的点：
  *   ① 英文名 —— 标题多半是中文，只能取拉丁字母/数字段；纯中文标题退化成 `req` 而不是空串；
  *   ② 确定性 —— 同一需求同一天必须生成同一个分支名（否则每点一次都开新分支）；
- *   ③ **不带 branch 的提示词一个字节都没变** —— 另一个按钮就要求「和现在一样」。
+ *   ③ **不带 branch 的提示词一个字节都没变**；
+ *   ④ 两种基线的提示词**只差分支那一段**：命令与风险提醒不同，其余段一字不差。
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
-import { branchFormatHint, branchName, englishSlug, requirementNumber } from '../lib/branch.js'
+import { branchFormatHint, branchName, englishSlug, normBranchMode, requirementNumber } from '../lib/branch.js'
 import { buildRequirementBrief } from '../lib/brief.js'
 import { buildTools } from '../lib/tools.js'
 import { captureApi, callApi, openStore, useTempHome } from './helpers.js'
@@ -130,4 +133,89 @@ test('工具：ph_brief {branch:true} 返回分支名', async () => {
   const branched = await byName.get('ph_brief').execute({ id: 'SPMS-6002', branch: true })
   assert.match(branched.branch, /^feature\/\d{8}-queue-board-6002$/)
   assert.match(branched.text, /git checkout -b feature\//)
+})
+
+test('normBranchMode：三种取值，且兼容旧的 true', () => {
+  for (const off of [false, null, undefined, '', '0', 'false', 'off', 'no']) {
+    assert.equal(normBranchMode(off), false, `${String(off)} → 不带分支段`)
+  }
+  for (const master of [true, 'true', '1', 'master', 'origin/master', 'yes']) {
+    assert.equal(normBranchMode(master), 'master', `${String(master)} → master`)
+  }
+  for (const current of ['current', 'Current', ' head ', 'current-branch']) {
+    assert.equal(normBranchMode(current), 'current', `${String(current)} → current`)
+  }
+})
+
+test('提示词：branch=current 从**当前分支**拉 —— 不 fetch、不切 master，但要先清工作区', async () => {
+  await store.saveRequirement({
+    id: 'SPMS-5923',
+    no: '5923',
+    project: 'spms',
+    title: 'Queue 数据记录',
+    readTitle: false,
+    links: [{ kind: 'doc', url: 'https://doc.example/5923', title: '需求文档' }],
+  })
+  const cur = buildRequirementBrief(store, 'SPMS-5923', { branch: 'current' })
+
+  assert.equal(cur.branchMode, 'current')
+  assert.match(cur.branch, /^feature\/\d{8}-queue-5923$/, '分支名与 master 那条一样（只是基线不同）')
+  assert.match(cur.brief, /## 开工前：从\*\*当前分支\*\*拉新分支并切过去/)
+  assert.match(cur.brief, /git checkout -b feature\/\d{8}-queue-5923/)
+  assert.ok(!cur.brief.includes('origin/master'), 'current 基线不许出现 origin/master')
+  assert.ok(!cur.brief.includes('git fetch'), 'current 基线不做 fetch')
+  assert.match(cur.brief, /基线就是你当前所在的分支/)
+  assert.match(cur.brief, /别把当前分支上的无关改动带进这个新分支/, '要提醒先清工作区')
+  assert.match(cur.brief, /这个分支已经存在就直接/, '两种基线都要说清「已存在就直接切」')
+  assert.match(cur.brief, /## 资料链接/, '其余段落照旧')
+})
+
+test('两种基线只差分支那一段（其余一字不差）；branch:true 与 master 完全等价', async () => {
+  await store.saveRequirement({ id: 'SPMS-5924', no: '5924', project: 'spms', title: 'Queue 数据记录', readTitle: false })
+
+  const master = buildRequirementBrief(store, 'SPMS-5924', { branch: 'master' }).brief
+  const current = buildRequirementBrief(store, 'SPMS-5924', { branch: 'current' }).brief
+  assert.equal(buildRequirementBrief(store, 'SPMS-5924', { branch: true }).brief, master, '旧写法 true 必须与 master 一模一样')
+
+  const stripBranch = (text) =>
+    String(text)
+      .split('\n')
+      .filter((line) => !line.startsWith('## 开工前：'))
+      .filter((line) => !/^- (分支名|命名格式|命令|工作区|别把当前分支|\*\*基线|不要把 master|提交只包含)/.test(line))
+      .join('\n')
+      .replace(/\n{2,}/g, '\n')
+      .trim()
+  assert.equal(stripBranch(master), stripBranch(current), '除分支段外，两种基线必须完全一致')
+  assert.notEqual(master, current, '分支段本身必须不同（不能只换了标题）')
+})
+
+test('API：GET /brief?branch=current 与 POST /open-session {branch:"current"}', async () => {
+  await store.saveRequirement({ id: 'SPMS-6003', no: '6003', project: 'spms', title: 'Queue Board', readTitle: false })
+
+  const cur = await callApi(api.handler, { method: 'GET', url: `${BASE}/brief?id=SPMS-6003&branch=current` })
+  assert.equal(cur.json.branchMode, 'current')
+  assert.match(cur.json.brief, /从\*\*当前分支\*\*拉新分支/)
+
+  const byName2 = await callApi(api.handler, { method: 'GET', url: `${BASE}/brief?id=SPMS-6003&branch=master` })
+  assert.equal(byName2.json.branchMode, 'master', '?branch=master 也认')
+  assert.match(byName2.json.brief, /origin\/master/)
+
+  const session = await callApi(api.handler, { method: 'POST', url: `${BASE}/open-session`, body: { id: 'SPMS-6003', branch: 'current' } })
+  assert.equal(session.statusCode, 200)
+  assert.equal(session.json.branchMode, 'current')
+  assert.match(session.json.prompt, /从\*\*当前分支\*\*拉新分支/)
+  assert.ok(!session.json.prompt.includes('origin/master'), 'current 那条不许出现 origin/master')
+})
+
+test('工具：ph_brief {branch:"current"} 走当前分支；旧的 "true" 仍当 master', async () => {
+  await store.saveRequirement({ id: 'SPMS-6004', no: '6004', project: 'spms', title: 'Queue Board', readTitle: false })
+
+  const cur = await byName.get('ph_brief').execute({ id: 'SPMS-6004', branch: 'current' })
+  assert.equal(cur.branchMode, 'current')
+  assert.match(cur.text, /从\*\*当前分支\*\*拉新分支/)
+  assert.ok(!cur.text.includes('origin/master'))
+
+  const legacy = await byName.get('ph_brief').execute({ id: 'SPMS-6004', branch: 'true' })
+  assert.equal(legacy.branchMode, 'master', '旧的字符串 true 仍当 master')
+  assert.match(legacy.text, /origin\/master/)
 })

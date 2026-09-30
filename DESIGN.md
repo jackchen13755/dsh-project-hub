@@ -202,11 +202,22 @@
 可单条删除、「读标题」按条读回，**行首 ↗ 直接打开**；详情里可直接加链接、逐条删除。
 数据全部走上面的 HTTP 契约，失败一律顶部提示条反馈。
 
-**两个「开新会话」**：`POST /open-session {branch:true}` 会在提示词里插入「## 开工前：从 master 拉新分支并切过去」
-（分支名 + 命名格式 + `git fetch origin && git checkout -b <branch> origin/master` + 「已存在就直接切」+「基线是 master」）。
-分支名由 `lib/branch.js` 生成：`feature/YYYYMMDD-<英文slug>-<需求号>`，日期按 `Asia/Shanghai`，
-英文 slug 只保留标题里的拉丁字母/数字段（纯中文标题退化成 `req`），**同一天同一需求稳定复现**。
-不带 `branch` 的路径**一个字节都没变** —— 测试会把分支段整块抠掉后断言两份提示词完全一致。
+**三个「开新会话」（拉分支有两种基线，用户 2026-09-30 要求把原来的一种拆成两种）**：
+`POST /open-session {branch}` 里的 `branch` 现在有三种取值，统一由 `lib/branch.js` 的 `normBranchMode()`
+归一（面板两个按钮、`GET /brief?branch=`、`ph_brief` 的 branch 参数都走它，避免各处各认一套）：
+
+| branch | 基线段落 | 命令 | 要防的事 |
+| --- | --- | --- | --- |
+| 不传 / `false` | 不加（原行为，一个字节没变） | — | — |
+| `'master'`（`true` 等价，兼容旧调用） | 「## 开工前：从 master 拉新分支并切过去」 | `git fetch origin && git checkout -b <b> origin/master` | 把别的分支的改动带进来 |
+| `'current'` | 「## 开工前：从**当前分支**拉新分支并切过去」 | `git status` 先看工作区 → `git checkout -b <b>`（不 fetch、不切 master） | 工作区没清就把脏改动带进新分支 |
+
+两段都写清「分支已存在就直接 `git checkout <b>`、不重建」与「提交只含本需求改动」——所以不是只换一行命令，
+**提醒本身就不一样**。分支名两种基线完全一样，由 `lib/branch.js` 生成：`feature/YYYYMMDD-<英文slug>-<需求号>`，
+日期按 `Asia/Shanghai`，英文 slug 只保留标题里的拉丁字母/数字段（纯中文标题退化成 `req`），**同一天同一需求稳定复现**。
+测试钉住三件事：不带 `branch` 的提示词一个字节没变、`branch:true` 与 `'master'` 完全等价、两种基线**只差分支那一段**。
+面板上：卡片与详情各两个按钮（「开新会话·当前分支」/「开新会话·master」，每项目一行的小按钮是「开·当前」/「开·master」），
+开会话成功后的提示条按 `branchMode` 说「从当前分支 / 从 master 拉分支」。
 
 **叫专家的引导**（`expertGuideSection()`，用户 2026-09-30 要求）：简报在「## 请做的第一件事」**之前**多一段
 「## 需要的话叫专家」——先 `list_experts()` 看这次能用谁（Agency 专家默认全关，要用户在它的设置页里开）、

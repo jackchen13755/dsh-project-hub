@@ -394,6 +394,29 @@ test('删除按钮：两段确认的文案状态机（只在归档视图出现�
   assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'log', 7), '确认删除？')
 })
 
+test('开新会话的两个拉分支按钮：一个从当前分支、一个从 master，各传各的基线', () => {
+  const { def } = loadClient()
+  const src = String(def.factory.toString())
+
+  // 卡片与详情各有一对（原来只有一个「开新会话·拉分支」，用户要求拆成两种）
+  assert.ok(src.includes('开新会话·当前分支'), '要有「从当前分支拉」的按钮')
+  assert.ok(src.includes('开新会话·master'), '要有「从 master 拉」的按钮')
+  assert.ok(!src.includes('开新会话·拉分支'), '旧的单一「拉分支」按钮应已被两个按钮取代（别再变回一种）')
+
+  // 按钮把各自的基线传给宿主（'current' / 'master'）
+  assert.ok(src.includes("branch: 'current'"), '「当前分支」按钮必须传 current')
+  assert.ok(src.includes("branch: 'master'"), '「master」按钮必须传 master')
+
+  // 详情里每个项目一行也给两个小按钮
+  assert.ok(src.includes("'开·当前'") && src.includes("'开·master'"), '每个项目的两个小按钮')
+
+  // 详情回调默认 master（老按钮语义不变），并透传 mode
+  assert.match(src, /onOpenSessionBranch: \(projectId, mode = 'master'\)/)
+
+  // 状态文案要说清是哪种基线，不能一律说「从 master」
+  assert.match(src, /payload\.branchMode === 'current' \? '当前分支' : 'master'/)
+})
+
 test('候选箱不再被截断（原先 slice(0,8) 只剩 8 条 —— 用户实测反馈"展示不全"）', () => {
   const { def } = loadClient()
   const src = String(def.factory.toString())
