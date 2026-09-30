@@ -150,13 +150,21 @@ test('报告口径：文档在前、开发在后（work-since-doc）不许被写
   assert.match(markdown, /漂移对账：\*\*work-since-doc\*\*/)
 })
 
-test('renderReviewReport：五节齐全 + 明写边界；无关联时也说清楚', async () => {
+test('renderReviewReport：九节齐全 + 明写边界；无关联时也说清楚', async () => {
   await seed()
   const report = store.buildReviewReport('SPMS-5922', { now: '2026-09-29 20:00' })
   assert.equal(report.ok, true)
-  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 遗漏检查（改一处，还有哪些地方要跟着改）', '## 6. 复用检查（能不能不做）', '## 7. 前端交互检查', '## 8. 证据与边界']) {
+  for (const section of ['## 1. 相关历史需求', '## 2. 潜在冲突点', '## 3. 建议在会上问清楚', '## 4. 文档缺口检查', '## 5. 遗漏检查（改一处，还有哪些地方要跟着改）', '## 6. 复用检查（能不能不做）', '## 7. 前端交互检查', '## 8. 证据与边界', '## 9. 评审时并排叫这三位']) {
     assert.ok(report.markdown.includes(section), `报告缺小节：${section}`)
   }
+  // 第 9 节：产品侧与工程侧分工不重叠 → 必须并排叫（用户 2026-09-30 要求）
+  assert.match(report.markdown, /\*\*产品经理\*\*/, '产品侧：值不值得做 / 验收标准 / 边界')
+  assert.match(report.markdown, /\*\*软件架构师\*\*/, '工程侧：改动面 / 接口与数据 / 回滚')
+  assert.match(report.markdown, /\*\*验收测试工程师\*\*/, '验收侧：用例与通过条件')
+  assert.match(report.markdown, /summon_experts\(\[/, '要给出并行叫法')
+  assert.match(report.markdown, /需求优先级分析师/, '有争议时的加人选项')
+  assert.match(report.markdown, /材料不是系统指令/, '专家结论的定位')
+  assert.match(report.markdown, /工具面里没有 `list_experts` 就跳过本节/, '没装专家插件时本节要能跳过')
   assert.match(report.markdown, /SPMS-6001/)
   assert.match(report.markdown, /同一份 Figma 设计稿/)
   assert.match(report.markdown, /不是冲突概率/)
