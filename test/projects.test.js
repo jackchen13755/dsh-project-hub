@@ -6,7 +6,7 @@
  * `useTempHome()` 设的 `DSH_PROJECT_ROOTS` 兜住确定性。
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { after, before, test } from 'node:test'
 import {
@@ -251,6 +251,76 @@ test('workspace: readProjectCaches 解析 session_projcache（零解压拿 cwd/�
 
   assert.equal(readProjectCaches({ DSH_HOME: home }, { limit: 1 }).length, 1)
   assert.deepEqual(readProjectCaches({ DSH_HOME: join(scratch, 'home-empty') }), [])
+})
+
+test('workspace: readProjectCaches 的目录缓存不能返回陈旧数据', async () => {
+  const home = join(scratch, 'home-cache-stale')
+  const dir = join(home, 'storages', 'session_projcache', 'sessions')
+  writeFixture(dir, 'sess-a.json', JSON.stringify({ record: { identity: { cwd: spmsRoot }, rows: {} } }))
+
+  const env = { DSH_HOME: home }
+  const first = readProjectCaches(env)
+  assert.deepEqual(first.map((c) => c.sessionId), ['sess-a'])
+
+  // ① 新增会话文件 → 下一次读必须看见（目录 mtime / 文件名清单任一判据命中即可）
+  writeFixture(dir, 'sess-b.json', JSON.stringify({ record: { identity: { cwd: spmsUiRoot }, rows: {} } }))
+  const second = readProjectCaches(env)
+  assert.deepEqual(second.map((c) => c.sessionId).sort(), ['sess-a', 'sess-b'], '新增的投影缓存必须立刻可见')
+
+  // ② 删除会话文件 → 下一次读必须看不见（缓存不能把已删的会话留在候选里）
+  rmSync(join(dir, 'sess-a.json'))
+  const third = readProjectCaches(env)
+  assert.deepEqual(third.map((c) => c.sessionId), ['sess-b'], '删掉的文件不能还被缓存带出来')
+
+  // ③ 原地改写（文件名与个数都不变）→ 也必须察觉，否则标题/项目会停在旧值
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  writeFixture(dir, 'sess-b.json', JSON.stringify({
+    record: { identity: { cwd: spmsRoot }, rows: { title: { val: '改过的标题' } } },
+  }))
+  const fourth = readProjectCaches(env)
+  assert.equal(fourth.length, 1)
+  assert.equal(fourth[0].cwd, spmsRoot, '原地改写后不能再返回旧的 cwd')
+  assert.equal(fourth[0].title, '改过的标题')
+})
+
+/**
+ * 缓存判据的**已知盲区**，写成测试是为了让它显式存在、而不是靠注释。
+ *
+ * 判据是 `name + size + mtimeMs`：如果写入方把三元组精确复原
+ * （`tar -x` / `rsync --times` / `git checkout` 这类保留 mtime 的写回），缓存察觉不到。
+ * 正常写入方是宿主自己（必改 size 或 mtime），所以这不是日常路径；
+ * 这里断言的是「当前行为如何」，不是「这是对的」—— 将来若要收紧，改这条测试即起点。
+ *
+ * 注意复原必须用 **数值形式的 `mtimeMs / 1000`**：实测 `utimesSync(file, atime, mtime)`
+ * 传 `Date` 会截断到整毫秒，反而复原不成功（实测差 0.47ms，于是缓存仍会察觉）。
+ */
+test('workspace: 目录缓存的已知盲区 —— 三元组被复原时察觉不到', () => {
+  const home = join(scratch, 'home-cache-blindspot')
+  const dir = join(home, 'storages', 'session_projcache', 'sessions')
+  const env = { DSH_HOME: home }
+  const file = join(dir, 'sess-a.json')
+
+  // 手工构造两条**同字节长度**、只有 cwd 不同的内容：
+  // 长度必须自己控制，不能靠两个 fixture 路径恰好等长。
+  const original = '{"record":{"identity":{"cwd":"/work/aaa"}}}'
+  const replaced = '{"record":{"identity":{"cwd":"/work/bbb"}}}'
+  assert.equal(original.length, replaced.length, '前提：两条内容必须同字节长度')
+
+  writeFixture(dir, 'sess-a.json', original)
+  const before = statSync(file)
+  assert.equal(readProjectCaches(env)[0].cwd, '/work/aaa')
+
+  // 写入新内容，再把 mtime 精确复原回旧值（数值形式，保留亚毫秒）
+  writeFixture(dir, 'sess-a.json', replaced)
+  utimesSync(file, before.atimeMs / 1000, before.mtimeMs / 1000)
+  const after = statSync(file)
+  assert.equal(after.size, before.size, '前提：写入前后 size 不变')
+  // 宽容到 1ms：在 mtime 粒度只到整毫秒的文件系统上 before.mtimeMs 可能恰好是整数，
+  // 严格相等会假红；只要差值 < 1ms 就说明确实复现了「复原」这个前提。
+  assert.ok(Math.abs(after.mtimeMs - before.mtimeMs) < 1, '前提：mtime 必须被复原，否则测的不是这个盲区')
+
+  // 记录当前（已知会陈旧）的行为
+  assert.equal(readProjectCaches(env)[0].cwd, '/work/aaa', '已知盲区：三元组复原后会返回陈旧数据')
 })
 
 test('workspace: projectCandidatesFrom 去重（注册表优先于会话缓存）', () => {
