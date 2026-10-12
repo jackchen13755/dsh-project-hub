@@ -54,8 +54,13 @@ test('链接：kind 归一化（英文 key 与中文标签都认）', () => {
   assert.equal(normLinkKind('UI设计'), 'ui')
   assert.equal(normLinkKind('设计稿'), 'ui')
   assert.equal(normLinkKind('figma'), 'ui')
+  // 设计规格报告（本地已解码的报告路径；2026-09-30 新增）
+  assert.equal(normLinkKind('spec'), 'spec')
+  assert.equal(normLinkKind('设计规格报告'), 'spec')
+  assert.equal(normLinkKind('解码报告'), 'spec')
+  assert.equal(normLinkKind('figma报告'), 'spec')
   assert.equal(normLinkKind('莫名'), 'other')
-  assert.deepEqual(LINK_KINDS, ['doc', 'wbs', 'design', 'ui', 'other'])
+  assert.deepEqual(LINK_KINDS, ['doc', 'wbs', 'design', 'ui', 'spec', 'other'])
 })
 
 test('链接：一次保存 4 类共 7 条，主链接镜像与分类查询都对', async () => {

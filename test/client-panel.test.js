@@ -234,8 +234,9 @@ test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条�
   const mod = def.factory(() => fakeReact())
   const { LINK_LABEL, LINK_FORM_KINDS, renderLinkChips } = mod.__test
 
-  assert.deepEqual([...LINK_FORM_KINDS], ['doc', 'wbs', 'design', 'ui'])
+  assert.deepEqual([...LINK_FORM_KINDS], ['doc', 'wbs', 'design', 'ui', 'spec'])
   assert.equal(LINK_LABEL.ui, 'UI 设计')
+  assert.equal(LINK_LABEL.spec, '设计规格报告')
   assert.equal(LINK_LABEL.design, '后端设计')
 
   const links = [
@@ -295,7 +296,7 @@ test('多链接：四类链接字典 + 卡片链接渲染（UI 设计可多条�
     return slotRegistrations.find((r) => r.p.name === 'sidebar.right.pane.tab').render({ sessionId: null })
   })()
   assert.ok(body)
-  assert.equal(mod2.__test.LINK_FORM_KINDS.length, 4)
+  assert.equal(mod2.__test.LINK_FORM_KINDS.length, 5)
 })
 
 test('项目配色：同一项目恒定同色，不同项目基本不同色（浅深主题都可读的色板）', () => {
