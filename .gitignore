@@ -6,6 +6,9 @@ dist/
 *.log
 coverage/
 .tmp/
+# .scratch/：测试 / tools/panel-preview.mjs 的工作目录。
+# ⚠️ 面板预览是从**本机宿主**拉的真实台账数据（内网 wiki 链接、本机绝对路径、库路径）→ 一律不进库。
+.scratch/
 .secrets/
 *.token
 *.pem

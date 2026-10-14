@@ -433,3 +433,95 @@ test('需求表单在两个 tab 都能看到（在历史需求 tab 点新建也�
   assert.ok(/view === 'req' \|\| view === 'history'/.test(body), '表单渲染条件要含历史需求 tab')
   assert.ok(/const openReqForm = /.test(body), '打开表单时要切到需求台账 tab（双保险）')
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 运行筛选/分页（用户实测反馈换来的回归）：切 tab 不串条件、点「查询」才生效、
+// 列表有 loading、有翻页。这里测的是**纯函数 + 源码契约**（假 React 跑不了 effect）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('筛选条件按 tab 各一份：互不共享、互不串（切 tab 条件不会带过去）', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { emptyFilter, newFilterMap, TABS } = mod.__test
+
+  const map = newFilterMap({ page: 1, pageSize: 20 })
+  for (const [key] of TABS) assert.ok(map[key], `每个 tab 都要有自己的条件：${key}`)
+  // ① 不是同一个对象引用（共享引用 = 切 tab 就是同一份条件）
+  assert.notEqual(map.req, map.logs)
+  assert.notEqual(map.req, map.history)
+  assert.notEqual(map.logs, map.scan)
+  // ② 改一个不影响另一个
+  map.logs.from = '2026-10-01'
+  map.logs.q = '看板'
+  assert.equal(map.scan.from, '', '扫描 tab 的日期不该被日志 tab 改到')
+  assert.equal(map.req.q, '', '需求 tab 的关键词不该被日志 tab 改到')
+  assert.equal(map.req.pageSize, 20, '分页参数要跟着每个 tab 一份')
+  // ③ 空条件就是一条干净的条件（含排序/标签，重置必须能清干净）
+  const blank = emptyFilter()
+  assert.deepEqual(Object.keys(blank).sort(), ['from', 'kind', 'project', 'q', 'showArchived', 'sort', 'tag', 'to'])
+  assert.equal(blank.sort, 'created')
+})
+
+test('列表查询：按 tab 只带自己的键，分页落到服务端 limit/offset', () => {
+  const { def } = loadClient()
+  const mod = def.factory(() => fakeReact())
+  const { listQuery } = mod.__test
+
+  const logs = listQuery('logs', { q: 'bug', project: 'spms', from: '2026-10-01', to: '2026-10-14', kind: 'bug', showArchived: true, page: 3, pageSize: 20 })
+  assert.equal(logs.path, '/logs')
+  assert.equal(logs.query.limit, 20)
+  assert.equal(logs.query.offset, 40, '第 3 页 × 每页 20 条 = offset 40')
+  assert.equal(logs.query.archived, 'only')
+  assert.ok(!('tag' in logs.query), '日志 tab 不该带 tag')
+  assert.ok(!('sort' in logs.query), '日志 tab 不该带 sort')
+  assert.ok(!('historical' in logs.query), '日志 tab 不该带 historical')
+
+  const req = listQuery('req', { q: '看板', tag: '历史导入', sort: 'worked', page: 1, pageSize: 50 })
+  assert.equal(req.path, '/requirements')
+  assert.equal(req.query.historical, 'exclude', '需求台账默认不含历史导入')
+  assert.equal(req.query.offset, 0)
+  assert.equal(req.query.limit, 50)
+  assert.ok(!('kind' in req.query) && !('from' in req.query), '需求 tab 不该带日志的日期/类型')
+
+  const history = listQuery('history', { page: 2, pageSize: 20 })
+  assert.equal(history.query.historical, 'only', '历史 tab 只看历史导入')
+  assert.equal(history.query.offset, 20)
+
+  const scan = listQuery('scan', { project: 'spms', from: '2026-10-01', to: '2026-10-14', pageSize: 20 })
+  assert.equal(scan.path, '/report')
+  assert.equal(scan.query.limit, 31, '报表固定看最近 31 天')
+
+  assert.equal(listQuery('drift', {}), null, '变更对账没有列表查询')
+})
+
+test('loadTab 的依赖数组覆盖全部筛选维度（原 bug：漏了 tag/sort → 点了不生效、切回来才生效）', () => {
+  const { def } = loadClient()
+  const src = String(def.factory.toString())
+  // 依赖数组**按集合比**，不按字面/顺序比 —— 换行、加注释、调顺序都不该误报，
+  // 但"少一个维度"必须报（漏 tag/sort 就是原 bug）。
+  const match = src.match(/const loadTab = useCallback\(\s*async \(options\) => \{[\s\S]*?\n\s*\}, \[([^\]]*)\]\)/)
+  assert.ok(match, '要能找到 loadTab 的 useCallback 依赖数组')
+  const deps = new Set(match[1].split(',').map((item) => item.trim()).filter(Boolean))
+  for (const key of ['filters', 'view', 'sessionId', 'reportError', 'loadCodeCoverage']) {
+    assert.ok(deps.has(key), `loadTab 依赖数组必须有 ${key}（实际：[${[...deps].join(', ')}]）`)
+  }
+  // `filters` 一份覆盖全部筛选维度；用 applied 而不是 draft
+  assert.match(src, /const filters = applied\[view\]/, 'loadTab 用 applied 条件（不是输入中的 draft）')
+  assert.match(src, /const spec = listQuery\(view, filters\)/, '查询串由纯函数 listQuery 拼，便于回归测试')
+  assert.match(src, /loadSeq\.current === seq/, '要按请求序号丢弃过期响应')
+})
+
+test('列表的「点一下生效没有」三件套：loading 状态、分页条、条数/时间读数', () => {
+  const { def } = loadClient()
+  const src = String(def.factory.toString())
+  // 这几条是**渲染出来的文案与控件**（行为断言在 test/panel-behavior.test.js，那里真的驱动了面板）
+  assert.match(src, /const \[loading, setLoading\] = useState\(false\)/, '要有 loading 状态')
+  assert.match(src, /正在查询…/, '要有「正在查询…」文案')
+  assert.match(src, /const pagerBar = \(/, '要有分页条')
+  assert.match(src, /const readout = view === 'history' \? `已采纳 \$\{total\} 条` : `共 \$\{total\} 条`/, '分页条要显示总条数（历史 tab 带限定词）')
+  assert.match(src, /'‹ 上一页'/, '要有上一页')
+  assert.match(src, /'下一页 ›'/, '要有下一页')
+  assert.match(src, /PAGE_SIZES\.map/, '要有每页条数选择')
+  assert.match(src, /条件已改，点「查询」生效/, '未应用的改动能看出来（否则分不清生效没有）')
+  assert.ok(!/⏳/.test(src), '别用 ⏳ 彩色 emoji（与面板单色线框语言不符）')
+})
