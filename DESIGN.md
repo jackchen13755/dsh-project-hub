@@ -164,6 +164,7 @@
 | GET | `/requirements/tags` | `archived?,project?` | `{ ok, tags:[{tag,count}] }`（按条数降序，同数按码位；面板下拉与表单补全共用） |
 | GET | `/brief` | `id?,project?,task?,logs?` | `{ ok, brief, project:{id,name,root}, requirement:{id,title,status,links} }` |
 | POST | `/open-session` | `{ id, task?, logs? }` | `{ ok, prompt, project, workspace:{id,path,title,created}\|null, workspaceError, canCreate, requirement }` |
+| POST | `/review-session` | `{ id, project?, platform?, candidate? }` | `{ ok, prompt, chars, project, platform, candidate, workspace\|null, workspaceError, canCreate, requirement }` —— 评审提示词（资料 + 报告证据 + 只读评审口径），**只**按项目 root 登记 workspace |
 
 ## 7. Agent 工具面
 
@@ -409,7 +410,7 @@ excerpt, fetched_at)`，每次读文档存一版 `hash + 前 N 字`；这样"文
 > 全被判成"没写"。修法（schema v10）：抓快照时**对全文**算一遍关键词命中标记存进 `doc_snapshots.checks`，
 > 报告优先用标记、没有标记才退化成扫摘要 —— 仍然**不存全文**。
 
-`POST /project-hub/api/review-report {id}` → 渲染并返回报告（同时可作新会话提示词）：
+`POST /project-hub/api/review-report {id, project?, platform?, candidate?}` → 渲染并返回报告：
 
 1. **相关历史需求**：同模块（A）/ 同接口 / **同 Figma 文件** / 同页面 / 同端；每条给状态、代码落点、最近改动；
 2. **潜在冲突点**：同一文件、同一接口、同一份 UI 稿、同一端 —— 按"证据强度"排序；
@@ -422,6 +423,33 @@ excerpt, fetched_at)`，每次读文档存一版 `hash + 前 N 字`；这样"文
 
 **验收**：拿一条历史需求当"新需求"喂进去，报告里应出现它真实冲突过的那条需求（人工回看得出的
 冲突），并把冲突点定位到文件/接口/UI 稿级别；说不清的地方必须明确写"证据不足"，不许编。
+
+#### 9.4.1 「交给子 agent 评审」—— 报告本身**不是**提示词（2026-10-29）
+
+原实现里报告第 9 节只是写给读者的一句「用 `summon_experts` 去叫专家」，**代码从不真的拉 agent**
+（`buildReviewReport` 纯本地拼证据，零 import、零网络）。用户要求「点一下就交给子 agent 评审」，
+于是补了两段：
+
+| 环节 | 落点 | 职责 |
+| --- | --- | --- |
+| 提示词 | `lib/review-prompt.js` `buildReviewSessionPrompt()`（纯函数） | 元信息（复用 `buildRequirementBrief`，但关掉 `branch/handoff/experts` 三段开发口径）+ **报告 markdown 原样内联** + 只读评审口径（任务段放**最后**） |
+| 路由 | `POST /review-session`（`lib/api.js`） | 渲染提示词 + 按项目 root `ensureWorkspace`；**只**用 `result.project.root`，不接受 `body.root`、不回落 `cwd` |
+| 客户端 | `openReviewSession()` → `sendPromptToNewSession()`（`lib/client.js`） | `sessions.create → open → scope('conversation').send`；`fallbackWorkspace:false` |
+
+三条硬约束（都有测试钉住，改动前先看 `test/review-session.test.js`）：
+
+1. **报告不得单独当提示词**。只有报告而没有需求资料，子 agent 会以为自己在评审、手里却没有
+   「这条需求要做成什么」；反过来只有资料没有报告，它就得自己重算一遍。两者必须一起发。
+   这也是本节原先「报告同时可作新会话提示词」那句话被删掉的原因 —— 它会让人把两条路又合回去。
+2. **失败绝不降级成「只发简报」**：报告渲染抛错 → 500；报告为空 → 失败；找不到 → 404。
+   给出一份"看起来能发"的提示词是最坏的失败方式。
+3. **绝不把材料发进不相干的项目**：`ensureWorkspace` 的目录只认项目自己的 root。
+   曾经的 `?? cwd` 写法实测能被 `?sessionId=` 架空（把当前会话目录登记成评审项目并返回
+   `canCreate:true`，客户端护栏直接放行且无报错），现在服务端这一侧也堵掉了。
+
+**为什么新开路由而不是给 `/open-session` 加 `mode`**：`/open-session` 的主体是开发简报
+（第一句 `getRequirement`），而评审的**候选场景根本不在台账里**，走它必然 404；且 `prompt`
+一旦二义，`mode` 拼错就会静默发出去一份开发简报。
 
 ### 9.5 方案 D｜变更待办（可选）—— ✅ **P4 已实现（schema v12，默认关闭）**
 
