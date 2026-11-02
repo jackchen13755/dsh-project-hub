@@ -113,6 +113,7 @@
 | `chooseProjects(list, pickedIds)` | 纯函数：点过的（按**卡片顺序**，不是点选顺序）→ 主项目 → 第一个。空选择也回主项目，保证「开新会话」永远有目标 |
 | `togglePickedProject(id, projectId, list)` | 点一下加入 / 再点移出；**起点取"点之前实际选中的那几个"**（默认主项目不在 state 里，是回落值 —— 不这么做第一次点第二个就会把主项目挤掉，多选永远只有一个）；**至少留一个**（否则界面看着没选、实际照开主项目，提示与行为相反） |
 | 按钮标签 | 多选时写「开新会话（N 个）」，否则一次点出 N 个会话没有任何预告 |
+| 基线下拉（2026-11-02 合并） | 原来三个按钮「开新会话 / ·当前分支 / ·master」→ 改成**一个 `BranchPicker` 下拉 + 一个按钮**（`BRANCH_MODES` = `''` 不拉分支 / `'current'` / `'master'`，取值与宿主 `normBranchMode` 同一套写法；客户端独立模块不能 import，故有本地 `normBranchModeInput` 归一化）。多选之后三个按钮都会"开一堆"，既挤又容易点错 —— 用户要求合并。基线**按需求记**（`pickedBranch[reqId]`，默认 `''`），换一条需求不会被上一条的选择带跑；卡片与详情共用同一份。按钮文案把「开几个 + 哪个基线」都写出来（`开新会话（2 个·master）`） |
 | `openRequirementSessions(id, targets, {open, onStep})` | 模块级、串行，逐个工作区开；**一个失败不影响其它**。`open` 可注入 → 这条链路能脱离 React 直接测 |
 | 成败判定 | `sendPromptToNewSessionDetailed` 返回 `{ok, text}`：**「会话没建起来 / 简报没发出去」也是失败**。老实现只把 throw 当失败 → 汇总把「没开成」报成 ✓（代码审查抓到的 blocker） |
 | 重入 | `openBusyRef`（ref，不是 state）：卡片与详情各有一套按钮、`busy` 是全局布尔，没这道锁会同时跑两轮 → 同一工作区开两个会话 |

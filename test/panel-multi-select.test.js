@@ -55,7 +55,8 @@ const pillOf = (mini, projectId) => mini.buttons().find((el) => String(el.props.
 
 const exactButton = (mini, label) => mini.buttons().find((el) => String(el.props.children ?? '') === label)
 /** 「开新会话」按钮：多选时标签会带上个数（开新会话（2 个）），按前缀找。 */
-const openButton = (mini) => mini.buttons().find((el) => String(el.props.children ?? '').startsWith('开新会话') && !String(el.props.children ?? '').includes('·'))
+/** 「开新会话」按钮：靠稳定的 className 定位（标签会随「几个 / 哪个基线」变，不能靠文字）。 */
+const openButton = (mini) => mini.buttons().find((el) => String(el.props.className ?? '').includes('dsh-ph-open-session'))
 
 test('行为：默认只有主项目选中（与以前单选默认一致）', async () => {
   const fetchStub = makeFetch()
@@ -151,16 +152,71 @@ test('行为：最后一个工作区移不掉（避免「看着没选、实际�
   assert.equal(bodies[0].project, 'demo-pc', '提示与实际行为一致：给选中的那个开')
 })
 
-test('行为：「开新会话·master」也按多选逐个开（分支模式逐个传）', async () => {
+/** 基线下拉（BranchPicker）：按 option 文本找，不靠顺序。 */
+const branchPicker = (mini) =>
+  mini.nodes()
+    .filter((el) => el.type === 'select')
+    .find((el) => (Array.isArray(el.props.children) ? el.props.children : []).some((opt) => String(opt?.props?.children ?? '') === '不拉分支'))
+
+test('行为：默认「不拉分支」—— 请求里不带 branch（老行为不变）', async () => {
+  const fetchStub = makeFetch()
+  const { mini, renderPanel } = mountPanel(fetchStub)
+  const root = () => renderPanel({ sessionId: 'session-multi' })
+  await mini.act(root)
+
+  const picker = branchPicker(mini)
+  assert.ok(picker, '卡片上要有基线下拉')
+  assert.equal(picker.props.value, '', '默认不拉分支')
+
+  await mini.act(root, () => openButton(mini).props.onClick())
+  const bodies = bodiesOf(fetchStub)
+  assert.equal(bodies.length, 1)
+  assert.equal(bodies[0].branch, undefined, '不拉分支时请求里不带 branch')
+})
+
+test('行为：下拉切到 master → 多选照样逐个开，且每个都带 master', async () => {
   const fetchStub = makeFetch()
   const { mini, renderPanel } = mountPanel(fetchStub)
   const root = () => renderPanel({ sessionId: 'session-multi' })
   await mini.act(root)
 
   await mini.act(root, () => pillOf(mini, 'demo-app').props.onClick())
-  await mini.act(root, () => exactButton(mini, '开新会话·master').props.onClick())
+  await mini.act(root, () => branchPicker(mini).props.onChange({ target: { value: 'master' } }))
+  // 按钮文案要把「开几个 + 从哪拉」都写出来
+  assert.equal(String(openButton(mini).props.children), '开新会话（2 个·master）')
 
+  await mini.act(root, () => openButton(mini).props.onClick())
   const bodies = bodiesOf(fetchStub)
   assert.equal(bodies.length, 2)
   assert.equal(bodies.map((b) => `${b.project}:${b.branch}`).join(','), 'demo-pc:master,demo-app:master')
+})
+
+test('行为：下拉切到「当前分支」→ 单选时按钮写「开新会话·当前分支」，请求带 current', async () => {
+  const fetchStub = makeFetch()
+  const { mini, renderPanel } = mountPanel(fetchStub)
+  const root = () => renderPanel({ sessionId: 'session-multi' })
+  await mini.act(root)
+
+  await mini.act(root, () => branchPicker(mini).props.onChange({ target: { value: 'current' } }))
+  assert.equal(String(openButton(mini).props.children), '开新会话·当前分支')
+
+  await mini.act(root, () => openButton(mini).props.onClick())
+  const bodies = bodiesOf(fetchStub)
+  assert.equal(bodies.length, 1)
+  assert.equal(bodies[0].branch, 'current')
+})
+
+test('行为：基线是按需求记的（换一层展开不会把上一条的选择带跑）', async () => {
+  const fetchStub = makeFetch()
+  const { mini, renderPanel } = mountPanel(fetchStub)
+  const root = () => renderPanel({ sessionId: 'session-multi' })
+  await mini.act(root)
+
+  await mini.act(root, () => branchPicker(mini).props.onChange({ target: { value: 'master' } }))
+  assert.equal(branchPicker(mini).props.value, 'master')
+  // 再切回不拉分支：值要真的回到 ''（不是留着 master）
+  await mini.act(root, () => branchPicker(mini).props.onChange({ target: { value: '' } }))
+  assert.equal(branchPicker(mini).props.value, '')
+  await mini.act(root, () => openButton(mini).props.onClick())
+  assert.equal(bodiesOf(fetchStub)[0].branch, undefined)
 })

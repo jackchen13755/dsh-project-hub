@@ -226,3 +226,42 @@ test('sendPromptToNewSessionDetailed：没有会话服务时返回 ok:false（�
   assert.equal(res.ok, false)
   assert.match(res.text, /会话服务不可见/)
 })
+
+// ── 基线（从哪个分支拉新分支）：一个下拉 + 一个按钮 ─────────────────────
+
+test('BRANCH_MODES：三个选项与 normBranchMode 的写法一致（不拉 / 当前分支 / master）', () => {
+  const { BRANCH_MODES } = loadClient()
+  assert.equal(BRANCH_MODES.length, 3)
+  assert.equal(BRANCH_MODES.map(([value]) => value).join('|'), '|current|master')
+  assert.equal(BRANCH_MODES.map(([, label]) => label).join('|'), '不拉分支|从当前分支|从 master')
+})
+
+test('normBranchModeInput：只认三档，别的都归到「不拉分支」', () => {
+  const { normBranchModeInput } = loadClient()
+  assert.equal(normBranchModeInput(''), '')
+  assert.equal(normBranchModeInput('current'), 'current')
+  assert.equal(normBranchModeInput('HEAD'), 'current', '认 head 别名（大小写不敏感）')
+  assert.equal(normBranchModeInput('master'), 'master')
+  assert.equal(normBranchModeInput(true), 'master', 'true 等价 master（老语义）')
+  assert.equal(normBranchModeInput('false'), '')
+  assert.equal(normBranchModeInput(undefined), '')
+  assert.equal(normBranchModeInput('develop'), '', '不认识的基线不许瞎猜')
+})
+
+test('branchModeLabel：按钮文案用的短标签', () => {
+  const { branchModeLabel } = loadClient()
+  assert.equal(branchModeLabel(''), '')
+  assert.equal(branchModeLabel('current'), '当前分支')
+  assert.equal(branchModeLabel('master'), 'master')
+})
+
+test('openRequirementSessions：基线逐个传下去（多选时每个会话用同一个基线）', async () => {
+  const { session } = loadClient()
+  const branches = []
+  const open = async (_id, _projectId, opts) => {
+    branches.push(opts?.branch ?? '')
+    return { ok: true, text: 'ok' }
+  }
+  await session.openRequirementSessions('DEMO-7', [{ projectId: 'a' }, { projectId: 'b' }], { branch: 'current', open })
+  assert.equal(branches.join(','), 'current,current')
+})

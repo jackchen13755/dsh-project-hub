@@ -1,6 +1,6 @@
 {
   "name": "dsh-project-hub",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "DeepSeek Harness 项目管理插件：需求 ID 台账（需求文档 / WBS / 后端设计文档 / 所属项目）+ 会话扫描开发记录 + 按项目 / 需求 / 日期检索（SQLite 单一事实源）",
   "type": "module",

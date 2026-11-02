@@ -395,27 +395,38 @@ test('删除按钮：两段确认的文案状态机（只在归档视图出现�
   assert.equal(deleteButtonLabel({ kind: 'log', id: 7 }, 'log', 7), '确认删除？')
 })
 
-test('开新会话的两个拉分支按钮：一个从当前分支、一个从 master，各传各的基线', () => {
+test('基线改成「一个下拉 + 一个按钮」：三种基线由 BranchPicker 选，旧的三个按钮已合掉', () => {
   const { def } = loadClient()
   const src = String(def.factory.toString())
+  const mod = def.factory(() => fakeReact())
+  const { BRANCH_MODES, normBranchModeInput, branchModeLabel } = mod.__test
 
-  // 卡片与详情各有一对（原来只有一个「开新会话·拉分支」，用户要求拆成两种）
-  assert.ok(src.includes('开新会话·当前分支'), '要有「从当前分支拉」的按钮')
-  assert.ok(src.includes('开新会话·master'), '要有「从 master 拉」的按钮')
-  assert.ok(!src.includes('开新会话·拉分支'), '旧的单一「拉分支」按钮应已被两个按钮取代（别再变回一种）')
+  // ① 下拉的三种基线：选项值就是宿主 normBranchMode 认的那套写法
+  assert.equal(BRANCH_MODES.map(([value]) => value).join('|'), '|current|master', '不拉 / 当前分支 / master')
+  assert.equal(normBranchModeInput('current'), 'current')
+  assert.equal(normBranchModeInput('HEAD'), 'current')
+  assert.equal(normBranchModeInput('master'), 'master')
+  assert.equal(normBranchModeInput(''), '', '默认不拉分支')
+  assert.equal(branchModeLabel('current'), '当前分支')
+  assert.equal(branchModeLabel(''), '')
 
-  // 按钮把各自的基线传给宿主（'current' / 'master'）
-  assert.ok(src.includes("branch: 'current'"), '「当前分支」按钮必须传 current')
-  assert.ok(src.includes("branch: 'master'"), '「master」按钮必须传 master')
+  // ② 旧的「三个按钮」已经合掉了 —— 别有人再加回来（用户 2026-11-02 明确要求合并）
+  assert.ok(!src.includes("'开新会话·当前分支'"), '旧的「·当前分支」按钮应已合并进下拉')
+  assert.ok(!src.includes("'开新会话·master'"), '旧的「·master」按钮应已合并进下拉')
+  assert.ok(!src.includes("'开·当前'") && !src.includes("'开·master'"), '项目行上的两个小按钮也应已合并')
+  assert.ok(!/onOpenSessionBranch/.test(src), '不再有 onOpenSessionBranch 这条回调')
 
-  // 详情里每个项目一行也给两个小按钮
-  assert.ok(src.includes("'开·当前'") && src.includes("'开·master'"), '每个项目的两个小按钮')
+  // ③ 只剩一个按钮，基线来自下拉（卡片与详情都走 openSessionFor）
+  assert.match(src, /className: 'dsh-ph-open-session'/, '按钮要有稳定标记（测试与样式都靠它）')
+  assert.match(src, /onClick: \(\) => void openSessionFor\(r, null, \{ branch: branchModeOf\(r\.id\) \}\)/, '卡片按钮按下拉的基线开')
+  assert.match(src, /onOpenSessionHere: \(projectId\) => void openSessionFor\(r, projectId, \{ branch: branchModeOf\(r\.id\) \}\)/, '项目行的「开」也用同一个基线')
 
-  // 详情回调默认 master（老按钮语义不变），并透传 mode
-  assert.match(src, /onOpenSessionBranch: \(projectId, mode = 'master'\)/)
+  // ④ 详情与卡片共用同一份选择，不是各记一份
+  assert.match(src, /sessionBranch: branchModeOf\(r\.id\)/)
+  assert.match(src, /onSessionBranch: \(mode\) => setBranchMode\(r\.id, mode\)/)
 
-  // 状态文案要说清是哪种基线，不能一律说「从 master」
-  assert.match(src, /payload\.branchMode === 'current' \? '当前分支' : 'master'/)
+  // ⑤ 基线要真的传到宿主：请求体里带上 branch（空串 = 不拉分支）
+  assert.match(src, /branch: branch \|\| undefined/, '空基线不塞进请求体')
 })
 
 test('候选箱不再被截断（原先 slice(0,8) 只剩 8 条 —— 用户实测反馈"展示不全"）', () => {
