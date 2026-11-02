@@ -311,7 +311,7 @@ test('项目配色：同一项目恒定同色，不同项目基本不同色（�
   assert.equal(projectColor(''), 'inherit', '没有项目时不上色，跟随主题')
 
   // 一组真实项目里至少要有多种颜色（否则「按项目区分」就白做了）
-  const ids = ['spms', 'spms-ui-spms', 'hs-config', 's360-mobile', 'ars-genesis', 'fo-portal', 'great-mobile', 'dsh-github']
+  const ids = ['proj-a', 'proj-a-ui', 'proj-b', 'proj-c', 'proj-d', 'proj-e', 'proj-f', 'proj-g'] // allow-privacy: 纯夹具 id
   const colors = new Set(ids.map((id) => projectColor(id)))
   assert.ok(colors.size >= 4, `8 个项目至少 4 种颜色，实际 ${colors.size}`)
 })

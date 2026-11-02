@@ -1,6 +1,6 @@
 {
   "name": "dsh-project-hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "DeepSeek Harness 项目管理插件：需求 ID 台账（需求文档 / WBS / 后端设计文档 / 所属项目）+ 会话扫描开发记录 + 按项目 / 需求 / 日期检索（SQLite 单一事实源）",
   "type": "module",
@@ -29,7 +29,9 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "lint:privacy": "bash scripts/lint-privacy.sh",
+    "pretest": "bash scripts/lint-privacy.sh"
   },
   "dsh": {
     "bundle": {
